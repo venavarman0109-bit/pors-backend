@@ -10,7 +10,7 @@ def get_connection():
         host="aws-1-ap-southeast-1.pooler.supabase.com",
         database="postgres",
         user="postgres.iedizehssmyerdbwxcly",
-        password="U4uesWPqV1GXXsdX",
+        password="U6j4GsQKY9P1VtBX",
         port="6543"
     )
 
@@ -59,6 +59,10 @@ def home():
 @app.route('/login', methods=['POST'])
 def login():
     data = request.json
+
+    if not data.get("username") or not data.get("password"):
+        return jsonify({"status": "fail"})
+
     conn = get_connection()
     cur = conn.cursor()
 
@@ -93,31 +97,47 @@ def login():
 @app.route('/add_user', methods=['POST'])
 def add_user():
     data = request.json
+
+    # 🔥 Validation
+    required_fields = ["username", "password", "role"]
+    for field in required_fields:
+        if not data.get(field):
+            return jsonify({"status": "error", "message": f"{field} missing"})
+
     conn = get_connection()
     cur = conn.cursor()
 
-    staff_id = generate_staff_id(data['role'])
+    try:
+        staff_id = generate_staff_id(data['role'])
 
-    cur.execute(
-        """
-        INSERT INTO users_v2 (staff_id, username, password, role, email, contact)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        """,
-        (
-            staff_id,
-            data['username'],
-            data['password'],
-            data['role'],
-            data['email'],
-            data['contact']
+        cur.execute(
+            """
+            INSERT INTO users_v2 (staff_id, username, password, role, email, contact)
+            VALUES (%s, %s, %s, %s, %s, %s)
+            """,
+            (
+                staff_id,
+                data['username'],
+                data['password'],
+                data['role'],
+                data.get('email', ''),
+                data.get('contact', '')
+            )
         )
-    )
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        conn.commit()
 
-    return jsonify({"status": "added", "staff_id": staff_id})
+        return jsonify({
+            "status": "added",
+            "staff_id": staff_id
+        })
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 # 👥 VIEW USERS (ACTIVITY)
@@ -149,7 +169,7 @@ def get_users():
     return jsonify(result)
 
 
-# 👥 FULL USERS (MANAGE PAGE)
+# 👥 FULL USERS
 @app.route('/get_users_full', methods=['GET'])
 def get_users_full():
     conn = get_connection()
@@ -180,7 +200,7 @@ def get_users_full():
     return jsonify(result)
 
 
-# ✏️ UPDATE USER (🔐 PROTECTED)
+# ✏️ UPDATE USER
 @app.route('/update_user', methods=['POST'])
 def update_user():
     data = request.json
@@ -188,11 +208,12 @@ def update_user():
     cur = conn.cursor()
 
     cur.execute("SELECT role FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
-    role = cur.fetchone()[0]
+    result = cur.fetchone()
 
-    if role == "System Admin":
-        cur.close()
-        conn.close()
+    if not result:
+        return jsonify({"status": "error"})
+
+    if result[0] == "System Admin":
         return jsonify({"status": "forbidden"})
 
     cur.execute("""
@@ -215,7 +236,7 @@ def update_user():
     return jsonify({"status": "updated"})
 
 
-# 🔑 RESET PASSWORD (🔐 PROTECTED)
+# 🔑 RESET PASSWORD
 @app.route('/reset_password', methods=['POST'])
 def reset_password():
     data = request.json
@@ -223,11 +244,12 @@ def reset_password():
     cur = conn.cursor()
 
     cur.execute("SELECT role FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
-    role = cur.fetchone()[0]
+    result = cur.fetchone()
 
-    if role == "System Admin":
-        cur.close()
-        conn.close()
+    if not result:
+        return jsonify({"status": "error"})
+
+    if result[0] == "System Admin":
         return jsonify({"status": "forbidden"})
 
     new_password = ''.join(random.choices('0123456789', k=6))
@@ -246,7 +268,7 @@ def reset_password():
     })
 
 
-# ❌ DELETE USER (🔐 PROTECTED)
+# ❌ DELETE USER
 @app.route('/delete_user', methods=['POST'])
 def delete_user():
     data = request.json
@@ -254,11 +276,12 @@ def delete_user():
     cur = conn.cursor()
 
     cur.execute("SELECT role FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
-    role = cur.fetchone()[0]
+    result = cur.fetchone()
 
-    if role == "System Admin":
-        cur.close()
-        conn.close()
+    if not result:
+        return jsonify({"status": "error"})
+
+    if result[0] == "System Admin":
         return jsonify({"status": "forbidden"})
 
     cur.execute("DELETE FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
@@ -269,6 +292,8 @@ def delete_user():
 
     return jsonify({"status": "deleted"})
 
+
+# 👤 MY ACCOUNT
 @app.route('/get_my_account', methods=['POST'])
 def get_my_account():
     data = request.json
@@ -294,6 +319,7 @@ def get_my_account():
         })
 
     return jsonify({"error": "User not found"}), 404
+
 
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
