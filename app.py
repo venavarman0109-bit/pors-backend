@@ -1,9 +1,10 @@
 from flask import Flask, request, jsonify
 import psycopg2
+import random
 
 app = Flask(__name__)
 
-# 🔥 IMPORTANT: connection created per request (no more locks)
+# 🔥 DB CONNECTION
 def get_connection():
     return psycopg2.connect(
         host="aws-1-ap-southeast-1.pooler.supabase.com",
@@ -13,10 +14,46 @@ def get_connection():
         port="6543"
     )
 
-# Health check
+# 🔥 GENERATE STAFF ID
+def generate_staff_id(role):
+    prefix_map = {
+        "System Admin": "SYS",
+        "Admin Staff": "ADM",
+        "Director": "DIR",
+        "Manager": "MGR",
+        "Supervisor": "SUP",
+        "Tele Clerk": "TC"
+    }
+
+    prefix = prefix_map.get(role, "USR")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT staff_id FROM users_v2
+        WHERE staff_id LIKE %s
+        ORDER BY staff_id DESC LIMIT 1
+    """, (prefix + "%",))
+
+    last = cur.fetchone()
+
+    if last:
+        number = int(last[0].replace(prefix, "")) + 1
+    else:
+        number = 1
+
+    cur.close()
+    conn.close()
+
+    return f"{prefix}{str(number).zfill(3)}"
+
+
+# 🟢 HEALTH
 @app.route('/')
 def home():
     return "PORS Backend Running ✅"
+
 
 # 🔐 LOGIN
 @app.route('/login', methods=['POST'])
@@ -33,7 +70,6 @@ def login():
     result = cur.fetchone()
 
     if result:
-        # update login time
         cur.execute(
             "UPDATE users_v2 SET login_time = NOW() WHERE username=%s",
             (data['username'],)
@@ -53,12 +89,14 @@ def login():
     return jsonify({"status": "fail"})
 
 
-# ➕ ADD USER
+# ➕ ADD USER (🔥 FIXED)
 @app.route('/add_user', methods=['POST'])
 def add_user():
     data = request.json
     conn = get_connection()
     cur = conn.cursor()
+
+    staff_id = generate_staff_id(data['role'])
 
     cur.execute(
         """
@@ -66,7 +104,7 @@ def add_user():
         VALUES (%s, %s, %s, %s, %s, %s)
         """,
         (
-            data['staff_id'],
+            staff_id,
             data['username'],
             data['password'],
             data['role'],
@@ -79,10 +117,10 @@ def add_user():
     cur.close()
     conn.close()
 
-    return jsonify({"status": "added"})
+    return jsonify({"status": "added", "staff_id": staff_id})
 
 
-# 👥 GET USERS (with login/logout time)
+# 👥 VIEW USERS (ACTIVITY)
 @app.route('/get_users', methods=['GET'])
 def get_users():
     conn = get_connection()
@@ -110,6 +148,8 @@ def get_users():
 
     return jsonify(result)
 
+
+# 👥 FULL USERS (MANAGE PAGE)
 @app.route('/get_users_full', methods=['GET'])
 def get_users_full():
     conn = get_connection()
@@ -137,6 +177,74 @@ def get_users_full():
     conn.close()
 
     return jsonify(result)
+
+
+# ✏️ UPDATE USER
+@app.route('/update_user', methods=['POST'])
+def update_user():
+    data = request.json
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE users_v2
+        SET username=%s, role=%s, email=%s, contact=%s
+        WHERE staff_id=%s
+    """, (
+        data['username'],
+        data['role'],
+        data['email'],
+        data['contact'],
+        data['staff_id']
+    ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "updated"})
+
+
+# 🔑 RESET PASSWORD
+@app.route('/reset_password', methods=['POST'])
+def reset_password():
+    data = request.json
+
+    new_password = ''.join(random.choices('0123456789', k=6))
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE users_v2 SET password=%s WHERE staff_id=%s
+    """, (new_password, data['staff_id']))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "status": "reset",
+        "new_password": new_password
+    })
+
+
+# ❌ DELETE USER
+@app.route('/delete_user', methods=['POST'])
+def delete_user():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "deleted"})
+
 
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
