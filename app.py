@@ -110,6 +110,33 @@ def get_users():
 
     return jsonify(result)
 
+@app.route('/get_users_full', methods=['GET'])
+def get_users_full():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT staff_id, username, role, email, contact
+        FROM users_v2
+        ORDER BY username
+    """)
+
+    users = cur.fetchall()
+
+    result = []
+    for u in users:
+        result.append({
+            "staff_id": u[0],
+            "username": u[1],
+            "role": u[2],
+            "email": u[3],
+            "contact": u[4]
+        })
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
 
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
