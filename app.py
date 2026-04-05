@@ -269,6 +269,31 @@ def delete_user():
 
     return jsonify({"status": "deleted"})
 
+@app.route('/get_my_account', methods=['POST'])
+def get_my_account():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT email, contact
+        FROM users_v2
+        WHERE username=%s
+    """, (data['username'],))
+
+    user = cur.fetchone()
+
+    cur.close()
+    conn.close()
+
+    if user:
+        return jsonify({
+            "email": user[0],
+            "contact": user[1]
+        })
+
+    return jsonify({"error": "User not found"}), 404
 
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
