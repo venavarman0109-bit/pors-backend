@@ -89,7 +89,7 @@ def login():
     return jsonify({"status": "fail"})
 
 
-# ➕ ADD USER (🔥 FIXED)
+# ➕ ADD USER
 @app.route('/add_user', methods=['POST'])
 def add_user():
     data = request.json
@@ -179,12 +179,21 @@ def get_users_full():
 
     return jsonify(result)
 
-# ✏️ UPDATE USER
+
+# ✏️ UPDATE USER (🔐 PROTECTED)
 @app.route('/update_user', methods=['POST'])
 def update_user():
     data = request.json
     conn = get_connection()
     cur = conn.cursor()
+
+    cur.execute("SELECT role FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
+    role = cur.fetchone()[0]
+
+    if role == "System Admin":
+        cur.close()
+        conn.close()
+        return jsonify({"status": "forbidden"})
 
     cur.execute("""
         UPDATE users_v2
@@ -206,15 +215,22 @@ def update_user():
     return jsonify({"status": "updated"})
 
 
-# 🔑 RESET PASSWORD
+# 🔑 RESET PASSWORD (🔐 PROTECTED)
 @app.route('/reset_password', methods=['POST'])
 def reset_password():
     data = request.json
-
-    new_password = ''.join(random.choices('0123456789', k=6))
-
     conn = get_connection()
     cur = conn.cursor()
+
+    cur.execute("SELECT role FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
+    role = cur.fetchone()[0]
+
+    if role == "System Admin":
+        cur.close()
+        conn.close()
+        return jsonify({"status": "forbidden"})
+
+    new_password = ''.join(random.choices('0123456789', k=6))
 
     cur.execute("""
         UPDATE users_v2 SET password=%s WHERE staff_id=%s
@@ -230,13 +246,20 @@ def reset_password():
     })
 
 
-# ❌ DELETE USER
+# ❌ DELETE USER (🔐 PROTECTED)
 @app.route('/delete_user', methods=['POST'])
 def delete_user():
     data = request.json
-
     conn = get_connection()
     cur = conn.cursor()
+
+    cur.execute("SELECT role FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
+    role = cur.fetchone()[0]
+
+    if role == "System Admin":
+        cur.close()
+        conn.close()
+        return jsonify({"status": "forbidden"})
 
     cur.execute("DELETE FROM users_v2 WHERE staff_id=%s", (data['staff_id'],))
 
