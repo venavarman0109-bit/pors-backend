@@ -156,7 +156,7 @@ def get_users_full():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT staff_id, username, role, email, contact
+        SELECT staff_id, username, role, email, contact, updated_by
         FROM users_v2
         ORDER BY username
     """)
@@ -170,14 +170,14 @@ def get_users_full():
             "username": u[1],
             "role": u[2],
             "email": u[3],
-            "contact": u[4]
+            "contact": u[4],
+            "updated_by": u[5] if u[5] else "-"
         })
 
     cur.close()
     conn.close()
 
     return jsonify(result)
-
 
 # ✏️ UPDATE USER
 @app.route('/update_user', methods=['POST'])
@@ -188,13 +188,14 @@ def update_user():
 
     cur.execute("""
         UPDATE users_v2
-        SET username=%s, role=%s, email=%s, contact=%s
+        SET username=%s, role=%s, email=%s, contact=%s, updated_by=%s
         WHERE staff_id=%s
     """, (
         data['username'],
         data['role'],
         data['email'],
         data['contact'],
+        data['updated_by'],
         data['staff_id']
     ))
 
