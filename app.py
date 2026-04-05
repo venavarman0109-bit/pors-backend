@@ -1,19 +1,17 @@
 from flask import Flask, request, jsonify
 import psycopg2
-import os
 
 app = Flask(__name__)
 
-# ✅ Use environment variables (IMPORTANT for Render)
 conn = psycopg2.connect(
     host="aws-1-ap-southeast-1.pooler.supabase.com",
     database="postgres",
     user="postgres.iedizehssmyerdbwxcly",
-    password="b0v2fTpnzvOJwz7W",
+    password="U4uesWPqV1GXXsdX",
     port="6543"
 )
 
-# ✅ Health check (VERY IMPORTANT)
+# ✅ Health check
 @app.route('/')
 def home():
     return "PORS Backend Running ✅"
@@ -39,20 +37,32 @@ def login():
     else:
         return jsonify({"status": "fail"})
 
-# ➕ ADD USER
+
+# ➕ ADD USER (✅ FIXED POSITION)
 @app.route('/add_user', methods=['POST'])
 def add_user():
     data = request.json
 
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO users (username, password, role) VALUES (%s, %s, %s)",
-        (data['username'], data['password'], data['role'])
+        """
+        INSERT INTO users (staff_id, username, password, role, email, contact)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        """,
+        (
+            data['staff_id'],
+            data['username'],
+            data['password'],
+            data['role'],
+            data['email'],
+            data['contact']
+        )
     )
 
     conn.commit()
 
     return jsonify({"status": "added"})
+
 
 # ✅ IMPORTANT FOR RENDER
 if __name__ == "__main__":
