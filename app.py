@@ -16,6 +16,7 @@ conn = psycopg2.connect(
 def home():
     return "PORS Backend Running ✅"
 
+
 # 🔐 LOGIN
 @app.route('/login', methods=['POST'])
 def login():
@@ -38,7 +39,7 @@ def login():
         return jsonify({"status": "fail"})
 
 
-# ➕ ADD USER (✅ FIXED POSITION)
+# ➕ ADD USER
 @app.route('/add_user', methods=['POST'])
 def add_user():
     data = request.json
@@ -62,6 +63,31 @@ def add_user():
     conn.commit()
 
     return jsonify({"status": "added"})
+
+
+# 👥 GET USERS (✅ CORRECT POSITION)
+@app.route('/get_users', methods=['GET'])
+def get_users():
+    cur = conn.cursor()
+    cur.execute("""
+        SELECT staff_id, username, role, email, contact
+        FROM users
+        ORDER BY staff_id
+    """)
+
+    users = cur.fetchall()
+
+    result = []
+    for u in users:
+        result.append({
+            "staff_id": u[0],
+            "username": u[1],
+            "role": u[2],
+            "email": u[3],
+            "contact": u[4]
+        })
+
+    return jsonify(result)
 
 
 # ✅ IMPORTANT FOR RENDER
