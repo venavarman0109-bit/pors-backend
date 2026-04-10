@@ -22,7 +22,8 @@ def generate_staff_id(role):
         "Director": "DIR",
         "Manager": "MGR",
         "Supervisor": "SUP",
-        "Tele Clerk": "TC"
+        "Tele Clerk": "TC",
+        "Agent": "AGT"
     }
 
     prefix = prefix_map.get(role, "USR")
@@ -31,10 +32,10 @@ def generate_staff_id(role):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT staff_id FROM users_v2
-        WHERE staff_id LIKE %s
-        ORDER BY staff_id DESC LIMIT 1
-    """, (prefix + "%",))
+        SELECT staff_id, username, role, login_time, logout_time
+        FROM users_v2
+        ORDER BY username
+    """)
 
     last = cur.fetchone()
 
@@ -157,10 +158,11 @@ def get_users():
     result = []
     for u in users:
         result.append({
-            "username": u[0],
-            "role": u[1],
-            "login_time": str(u[2]) if u[2] else "-",
-            "logout_time": str(u[3]) if u[3] else "-"
+            "staff_id": u[0],
+            "username": u[1],
+            "role": u[2],
+            "login_time": str(u[3]) if u[3] else "-",
+            "logout_time": str(u[4]) if u[4] else "-"
         })
 
     cur.close()
