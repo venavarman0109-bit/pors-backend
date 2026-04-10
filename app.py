@@ -148,36 +148,6 @@ def get_users():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT username, role, login_time, logout_time
-        FROM users_v2
-        ORDER BY username
-    """)
-
-    users = cur.fetchall()
-
-    result = []
-    for u in users:
-        result.append({
-            "staff_id": u[0],
-            "username": u[1],
-            "role": u[2],
-            "login_time": str(u[3]) if u[3] else "-",
-            "logout_time": str(u[4]) if u[4] else "-"
-        })
-
-    cur.close()
-    conn.close()
-
-    return jsonify(result)
-
-
-# 👥 FULL USERS
-@app.route('/get_users', methods=['GET'])
-def get_users():
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute("""
         SELECT staff_id, username, role, login_time, logout_time
         FROM users_v2
         ORDER BY username
@@ -199,7 +169,6 @@ def get_users():
     conn.close()
 
     return jsonify(result)
-
 
 # ✏️ UPDATE USER
 @app.route('/update_user', methods=['POST'])
