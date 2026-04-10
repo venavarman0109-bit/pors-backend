@@ -170,6 +170,35 @@ def get_users():
 
     return jsonify(result)
 
+@app.route('/get_users_full', methods=['GET'])
+def get_users_full():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT staff_id, username, role, email, contact, updated_by
+        FROM users_v2
+        ORDER BY username
+    """)
+
+    users = cur.fetchall()
+
+    result = []
+    for u in users:
+        result.append({
+            "staff_id": u[0],
+            "username": u[1],
+            "role": u[2],
+            "email": u[3],
+            "contact": u[4],
+            "updated_by": u[5] if u[5] else "-"
+        })
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
 # ✏️ UPDATE USER
 @app.route('/update_user', methods=['POST'])
 def update_user():
