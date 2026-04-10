@@ -320,6 +320,58 @@ def get_my_account():
 
     return jsonify({"error": "User not found"}), 404
 
+@app.route('/change_password', methods=['POST'])
+def change_password():
+    data = request.json
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Check current password
+    cur.execute(
+        "SELECT password FROM users_v2 WHERE username=%s",
+        (data['username'],)
+    )
+    result = cur.fetchone()
+
+    if not result:
+        return jsonify({"status": "error"})
+
+    if result[0] != data['old_password']:
+        return jsonify({"status": "wrong_password"})
+
+    # Update new password
+    cur.execute(
+        "UPDATE users_v2 SET password=%s WHERE username=%s",
+        (data['new_password'], data['username'])
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "updated"})
+
+@app.route('/update_my_account', methods=['POST'])
+def update_my_account():
+    data = request.json
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        UPDATE users_v2
+        SET email=%s, contact=%s
+        WHERE username=%s
+    """, (
+        data['email'],
+        data['contact'],
+        data['username']
+    ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "updated"})
 
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
