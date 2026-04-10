@@ -32,10 +32,10 @@ def generate_staff_id(role):
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT staff_id, username, role, login_time, logout_time
-        FROM users_v2
-        ORDER BY username
-    """)
+        SELECT staff_id FROM users_v2
+        WHERE staff_id LIKE %s
+        ORDER BY staff_id DESC LIMIT 1
+    """, (prefix + "%",))
 
     last = cur.fetchone()
 
@@ -172,13 +172,13 @@ def get_users():
 
 
 # 👥 FULL USERS
-@app.route('/get_users_full', methods=['GET'])
-def get_users_full():
+@app.route('/get_users', methods=['GET'])
+def get_users():
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT staff_id, username, role, email, contact, updated_by
+        SELECT staff_id, username, role, login_time, logout_time
         FROM users_v2
         ORDER BY username
     """)
@@ -191,9 +191,8 @@ def get_users_full():
             "staff_id": u[0],
             "username": u[1],
             "role": u[2],
-            "email": u[3],
-            "contact": u[4],
-            "updated_by": u[5] if u[5] else "-"
+            "login_time": str(u[3]) if u[3] else "-",
+            "logout_time": str(u[4]) if u[4] else "-"
         })
 
     cur.close()
