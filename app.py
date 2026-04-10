@@ -372,6 +372,71 @@ def update_my_account():
 
     return jsonify({"status": "updated"})
 
+@app.route('/check_report_limit', methods=['POST'])
+def check_report_limit():
+    data = request.json
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT COUNT(*) FROM outturn_reports
+        WHERE report_date=%s
+    """, (data['date'],))
+
+    count = cur.fetchone()[0]
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"count": count})
+
+@app.route('/add_outturn_report', methods=['POST'])
+def add_outturn_report():
+    data = request.json
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Insert main report
+    cur.execute("""
+        INSERT INTO outturn_reports
+        (vessel_name, port, berth, report_date, report_time, agent, created_by, delays, remarks)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+        RETURNING id
+    """, (
+        data['vessel_name'],
+        data['port'],
+        data['berth'],
+        data['date'],
+        data['time'],
+        data['agent'],
+        data['created_by'],
+        data['delays'],
+        data['remarks']
+    ))
+
+    report_id = cur.fetchone()[0]
+
+    # Insert items
+    for item in data['items']:
+        cur.execute("""
+            INSERT INTO outturn_report_items
+            (report_id, hatch, gangs, product, lorry_trips, tons)
+            VALUES (%s,%s,%s,%s,%s,%s)
+        """, (
+            report_id,
+            item['hatch'],
+            item['gangs'],
+            item['product'],
+            item['lorry_trips'],
+            item['tons']
+        ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "added"})
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
