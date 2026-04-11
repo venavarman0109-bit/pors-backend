@@ -637,6 +637,86 @@ def delete_hatch():
     conn.close()
 
     return jsonify({"status": "deleted"})
+
+# =========================
+# 🔄 UPDATE APIs (FIXED)
+# =========================
+
+@app.route('/update_product', methods=['POST'])
+def update_product():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "UPDATE products SET name=%s WHERE id=%s",
+        (data['name'], data['id'])
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "updated"})
+
+
+@app.route('/update_port', methods=['POST'])
+def update_port():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "UPDATE ports SET name=%s WHERE id=%s",
+        (data['name'], data['id'])
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "updated"})
+
+
+@app.route('/update_hatch', methods=['POST'])
+def update_hatch():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "UPDATE hatches SET name=%s WHERE id=%s",
+        (data['name'], data['id'])
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "updated"})
+
+
+@app.route('/update_berth', methods=['POST'])
+def update_berth():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "UPDATE berths SET name=%s, port_id=%s WHERE id=%s",
+        (data['name'], data['port_id'], data['id'])
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "updated"})
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
