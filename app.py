@@ -484,6 +484,55 @@ def delete_product():
     conn.close()
 
     return jsonify({"status": "deleted"})
+
+@app.route('/get_ports', methods=['GET'])
+def get_ports():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, name FROM ports ORDER BY name")
+    rows = cur.fetchall()
+
+    result = [{"id": r[0], "name": r[1]} for r in rows]
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
+@app.route('/add_port', methods=['POST'])
+def add_port():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("INSERT INTO ports (name) VALUES (%s)", (data['name'],))
+        conn.commit()
+    except:
+        return jsonify({"status": "error", "message": "Port exists"})
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "success"})
+
+@app.route('/delete_port', methods=['POST'])
+def delete_port():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM ports WHERE id=%s", (data['id'],))
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "deleted"})
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
