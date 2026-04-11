@@ -533,6 +533,110 @@ def delete_port():
 
     return jsonify({"status": "deleted"})
 
+@app.route('/get_berths', methods=['GET'])
+def get_berths():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT b.id, b.name, p.name
+        FROM berths b
+        JOIN ports p ON b.port_id = p.id
+        ORDER BY p.name
+    """)
+
+    rows = cur.fetchall()
+
+    result = [
+        {"id": r[0], "name": r[1], "port": r[2]}
+        for r in rows
+    ]
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
+@app.route('/add_berth', methods=['POST'])
+def add_berth():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute(
+        "INSERT INTO berths (port_id, name) VALUES (%s, %s)",
+        (data['port_id'], data['name'])
+    )
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "success"})
+
+@app.route('/delete_berth', methods=['POST'])
+def delete_berth():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM berths WHERE id=%s", (data['id'],))
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "deleted"})
+
+@app.route('/get_hatches', methods=['GET'])
+def get_hatches():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, name FROM hatches ORDER BY name")
+    rows = cur.fetchall()
+
+    result = [{"id": r[0], "name": r[1]} for r in rows]
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
+@app.route('/add_hatch', methods=['POST'])
+def add_hatch():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("INSERT INTO hatches (name) VALUES (%s)", (data['name'],))
+        conn.commit()
+    except:
+        return jsonify({"status": "error", "message": "Hatch exists"})
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "success"})
+
+@app.route('/delete_hatch', methods=['POST'])
+def delete_hatch():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM hatches WHERE id=%s", (data['id'],))
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "deleted"})
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
