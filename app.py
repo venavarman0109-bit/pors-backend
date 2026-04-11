@@ -437,6 +437,53 @@ def add_outturn_report():
 
     return jsonify({"status": "added"})
 
+@app.route('/get_products', methods=['GET'])
+def get_products():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("SELECT id, name FROM products ORDER BY name")
+    rows = cur.fetchall()
+
+    result = [{"id": r[0], "name": r[1]} for r in rows]
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
+@app.route('/add_product', methods=['POST'])
+def add_product():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("INSERT INTO products (name) VALUES (%s)", (data['name'],))
+        conn.commit()
+    except:
+        return jsonify({"status": "error", "message": "Product exists"})
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "success"})
+
+@app.route('/delete_product', methods=['POST'])
+def delete_product():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM products WHERE id=%s", (data['id'],))
+    conn.commit()
+
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "deleted"})
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
