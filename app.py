@@ -717,6 +717,203 @@ def update_berth():
 
     return jsonify({"status": "updated"})
 
+@app.route('/create_shipment', methods=['POST'])
+def create_shipment():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # 🔥 Generate shipment code
+    cur.execute("SELECT COUNT(*) FROM shipments")
+    count = cur.fetchone()[0] + 1
+    shipment_code = f"SHP{str(count).zfill(3)}"
+
+    cur.execute("""
+        INSERT INTO shipments (shipment_code, agent, port, berth, status)
+        VALUES (%s, %s, %s, %s, %s)
+        RETURNING id
+    """, (
+        shipment_code,
+        data['agent'],
+        data['port'],
+        data['berth'],
+        "START"
+    ))
+
+    shipment_id = cur.fetchone()[0]
+
+    # 🔥 Insert products
+    for p in data['products']:
+        cur.execute("""
+            INSERT INTO shipment_products
+            (shipment_id, product, total_tonnage, loaded)
+            VALUES (%s, %s, %s, %s)
+        """, (
+            shipment_id,
+            p['name'],
+            p['tonnage'],
+            0
+        ))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "shipment_id": shipment_id,
+        "shipment_code": shipment_code
+    })
+
+@app.route('/create_report', methods=['POST'])
+def create_report():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # 🔥 Get next report number
+    cur.execute("""
+        SELECT COUNT(*) FROM shipment_reports
+        WHERE shipment_id=%s
+    """, (data['shipment_id'],))
+
+    count = cur.fetchone()[0] + 1
+
+    report_id = f"{data['shipment_code']}-{str(count).zfill(2)}"
+
+    cur.execute("""
+        INSERT INTO shipment_reports
+        (shipment_id, report_no, report_id, date, start_time, end_time)
+        VALUES (%s, %s, %s, %s, %s, %s)
+        RETURNING id
+    """, (
+        data['shipment_id'],
+        count,
+        report_id,
+        data['date'],
+        data['start_time'],
+        data['end_time']
+    ))
+
+    report_db_id = cur.fetchone()[0]
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({
+        "report_id": report_id,
+        "report_db_id": report_db_id
+    })
+
+@app.route('/submit_outturn', methods=['POST'])
+def submit_outturn():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # 🔥 Insert report items
+    for item in data['items']:
+        cur.execute("""
+            INSERT INTO shipment_report_items
+            (report_id, product, tons, trips)
+            VALUES (%s, %s, %s, %s)
+        """, (
+            data['report_db_id'],
+            item['product'],
+            item['tons'],
+            item['trips']
+        ))
+
+        # 🔥 UPDATE LOADED
+        cur.execute("""
+            UPDATE shipment_products
+            SET loaded = loaded + %s
+            WHERE shipment_id=%s AND product=%s
+        """, (
+            item['tons'],
+            data['shipment_id'],
+            item['product']
+        ))
+
+    # 🔥 CHECK COMPLETION
+    cur.execute("""
+        SELECT COUNT(*) FROM shipment_products
+        WHERE shipment_id=%s AND loaded < total_tonnage
+    """, (data['shipment_id'],))
+
+    remaining = cur.fetchone()[0]
+
+    if remaining == 0:
+        cur.execute("""
+            UPDATE shipments SET status='COMPLETED'
+            WHERE id=%s
+        """, (data['shipment_id'],))
+
+    else:
+        cur.execute("""
+            UPDATE shipments SET status='ONGOING'
+            WHERE id=%s
+        """, (data['shipment_id'],))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "saved"})
+
+@app.route('/get_shipment_progress/<int:shipment_id>', methods=['GET'])
+def get_shipment_progress(shipment_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT product, loaded
+        FROM shipment_products
+        WHERE shipment_id=%s
+    """, (shipment_id,))
+
+    data = cur.fetchall()
+
+    result = {row[0]: row[1] for row in data}
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
+@app.route('/get_active_shipments', methods=['GET'])
+def get_active_shipments():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, shipment_code, agent, port, berth, status
+        FROM shipments
+        WHERE status != 'COMPLETED'
+        ORDER BY id DESC
+    """)
+
+    data = cur.fetchall()
+
+    result = []
+    for row in data:
+        result.append({
+            "id": row[0],
+            "shipment_code": row[1],
+            "agent": row[2],
+            "port": row[3],
+            "berth": row[4],
+            "status": row[5]
+        })
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
