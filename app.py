@@ -734,11 +734,12 @@ def submit_outturn():
             product = item['product']
             tons = int(item['tons'])
             trips = int(item.get('trips', 0))
+            gangs = int(item.get('gangs', 0))  # 🔥 NEW
 
             if tons <= 0:
                 return jsonify({"status": "error", "message": "Invalid tons value"})
 
-            # 🔥 GET CURRENT BALANCE FROM DB (NOT FRONTEND)
+            # 🔥 GET REAL DATA FROM DB
             cur.execute("""
                 SELECT total_tonnage, loaded
                 FROM shipment_products
@@ -752,22 +753,24 @@ def submit_outturn():
 
             total, loaded = result
 
+            # 🔥 STRICT VALIDATION
             if loaded + tons > total:
                 return jsonify({
                     "status": "error",
                     "message": f"{product} exceeds balance"
                 })
 
-            # 🔥 INSERT ITEM
+            # 🔥 INSERT REPORT ITEM (WITH GANGS)
             cur.execute("""
                 INSERT INTO shipment_report_items
-                (report_id, product, tons, trips)
-                VALUES (%s, %s, %s, %s)
+                (report_id, product, tons, trips, gangs)
+                VALUES (%s, %s, %s, %s, %s)
             """, (
                 data['report_db_id'],
                 product,
                 tons,
-                trips
+                trips,
+                gangs
             ))
 
             # 🔥 UPDATE LOADED
