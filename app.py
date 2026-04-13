@@ -724,55 +724,92 @@ def submit_outturn():
     conn = get_connection()
     cur = conn.cursor()
 
-    # 🔥 Insert report items
-    for item in data['items']:
+    try:
+        items = data.get("items", [])
+
+        if not items:
+            return jsonify({"status": "error", "message": "No items provided"})
+
+        for item in items:
+            product = item['product']
+            tons = int(item['tons'])
+            trips = int(item.get('trips', 0))
+
+            if tons <= 0:
+                return jsonify({"status": "error", "message": "Invalid tons value"})
+
+            # 🔥 GET CURRENT BALANCE FROM DB (NOT FRONTEND)
+            cur.execute("""
+                SELECT total_tonnage, loaded
+                FROM shipment_products
+                WHERE shipment_id=%s AND product=%s
+            """, (data['shipment_id'], product))
+
+            result = cur.fetchone()
+
+            if not result:
+                return jsonify({"status": "error", "message": f"{product} not found"})
+
+            total, loaded = result
+
+            if loaded + tons > total:
+                return jsonify({
+                    "status": "error",
+                    "message": f"{product} exceeds balance"
+                })
+
+            # 🔥 INSERT ITEM
+            cur.execute("""
+                INSERT INTO shipment_report_items
+                (report_id, product, tons, trips)
+                VALUES (%s, %s, %s, %s)
+            """, (
+                data['report_db_id'],
+                product,
+                tons,
+                trips
+            ))
+
+            # 🔥 UPDATE LOADED
+            cur.execute("""
+                UPDATE shipment_products
+                SET loaded = loaded + %s
+                WHERE shipment_id=%s AND product=%s
+            """, (
+                tons,
+                data['shipment_id'],
+                product
+            ))
+
+        # 🔥 CHECK COMPLETION
         cur.execute("""
-            INSERT INTO shipment_report_items
-            (report_id, product, tons, trips)
-            VALUES (%s, %s, %s, %s)
-        """, (
-            data['report_db_id'],
-            item['product'],
-            item['tons'],
-            item['trips']
-        ))
-
-        # 🔥 UPDATE LOADED
-        cur.execute("""
-            UPDATE shipment_products
-            SET loaded = loaded + %s
-            WHERE shipment_id=%s AND product=%s
-        """, (
-            item['tons'],
-            data['shipment_id'],
-            item['product']
-        ))
-
-    # 🔥 CHECK COMPLETION
-    cur.execute("""
-        SELECT COUNT(*) FROM shipment_products
-        WHERE shipment_id=%s AND loaded < total_tonnage
-    """, (data['shipment_id'],))
-
-    remaining = cur.fetchone()[0]
-
-    if remaining == 0:
-        cur.execute("""
-            UPDATE shipments SET status='COMPLETED'
-            WHERE id=%s
+            SELECT COUNT(*) FROM shipment_products
+            WHERE shipment_id=%s AND loaded < total_tonnage
         """, (data['shipment_id'],))
 
-    else:
+        remaining = cur.fetchone()[0]
+
+        status = "COMPLETED" if remaining == 0 else "ONGOING"
+
         cur.execute("""
-            UPDATE shipments SET status='ONGOING'
+            UPDATE shipments SET status=%s
             WHERE id=%s
-        """, (data['shipment_id'],))
+        """, (status, data['shipment_id']))
 
-    conn.commit()
-    cur.close()
-    conn.close()
+        conn.commit()
 
-    return jsonify({"status": "saved"})
+        return jsonify({
+            "status": "success",
+            "shipment_status": status
+        })
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
 
 @app.route('/get_shipment_progress/<int:shipment_id>', methods=['GET'])
 def get_shipment_progress(shipment_id):
