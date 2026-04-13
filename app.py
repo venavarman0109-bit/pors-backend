@@ -872,20 +872,21 @@ def create_shipment():
     port = data["port"]
     berth = data["berth"]
     products = data["products"]
+    operation_type = data.get("operation_type", "DISCHARGING")  # 🔥 NEW
 
     conn = get_connection()
     cur = conn.cursor()
 
-    # 🔥 shipment code
     cur.execute("SELECT COUNT(*) FROM shipments")
     count = cur.fetchone()[0] + 1
     shipment_code = f"SHP{str(count).zfill(3)}"
 
     cur.execute("""
-        INSERT INTO shipments (shipment_code, agent, port, berth, status)
-        VALUES (%s, %s, %s, %s, %s)
+        INSERT INTO shipments 
+        (shipment_code, agent, port, berth, status, operation_type)
+        VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING id
-    """, (shipment_code, agent, port, berth, "START"))
+    """, (shipment_code, agent, port, berth, "START", operation_type))
 
     shipment_id = cur.fetchone()[0]
 
@@ -907,7 +908,8 @@ def create_shipment():
 
     return jsonify({
         "shipment_id": shipment_id,
-        "shipment_code": shipment_code
+        "shipment_code": shipment_code,
+        "operation_type": operation_type  # 🔥 RETURN IT
     })
 
 @app.route('/create_report', methods=['POST'])
