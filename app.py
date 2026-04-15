@@ -720,11 +720,21 @@ def update_berth():
 @app.route('/submit_outturn', methods=['POST'])
 def submit_outturn():
     data = request.json
+    delays = data.get("delays", [])
+
+    import json
 
     conn = get_connection()
     cur = conn.cursor()
 
     try:
+        # 🔥 SAVE DELAYS (NEW)
+        cur.execute("""
+            UPDATE shipment_reports
+            SET delays = %s
+            WHERE id = %s
+        """, (json.dumps(delays), data['report_db_id']))
+
         items = data.get("items", [])
 
         if not items:
@@ -734,12 +744,12 @@ def submit_outturn():
             product = item['product']
             tons = int(item['tons'])
             trips = int(item.get('trips', 0))
-            gangs = int(item.get('gangs', 0))  # 🔥 NEW
+            gangs = int(item.get('gangs', 0))
 
             if tons <= 0:
                 return jsonify({"status": "error", "message": "Invalid tons value"})
 
-            # 🔥 GET REAL DATA FROM DB
+            # GET DATA
             cur.execute("""
                 SELECT total_tonnage, loaded
                 FROM shipment_products
@@ -753,14 +763,13 @@ def submit_outturn():
 
             total, loaded = result
 
-            # 🔥 STRICT VALIDATION
             if loaded + tons > total:
                 return jsonify({
                     "status": "error",
                     "message": f"{product} exceeds balance"
                 })
 
-            # 🔥 INSERT REPORT ITEM (WITH GANGS)
+            # INSERT ITEM
             cur.execute("""
                 INSERT INTO shipment_report_items
                 (report_id, product, tons, trips, gangs)
@@ -773,7 +782,7 @@ def submit_outturn():
                 gangs
             ))
 
-            # 🔥 UPDATE LOADED
+            # UPDATE LOADED
             cur.execute("""
                 UPDATE shipment_products
                 SET loaded = loaded + %s
@@ -784,14 +793,13 @@ def submit_outturn():
                 product
             ))
 
-        # 🔥 CHECK COMPLETION
+        # CHECK COMPLETION
         cur.execute("""
             SELECT COUNT(*) FROM shipment_products
             WHERE shipment_id=%s AND loaded < total_tonnage
         """, (data['shipment_id'],))
 
         remaining = cur.fetchone()[0]
-
         status = "COMPLETED" if remaining == 0 else "ONGOING"
 
         cur.execute("""
