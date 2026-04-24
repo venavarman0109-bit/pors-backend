@@ -1002,65 +1002,100 @@ def get_full_shipment(shipment_id):
 
 @app.route('/create_shipment', methods=['POST'])
 def create_shipment():
+    import traceback
+
     data = request.json
 
-    agent = data["agent"]
-    port = data["port"]
-    berth = data["berth"]
-    products = data["products"]
-    operation_type = data.get("operation_type", "DISCHARGING")  # 🔥 NEW
+    try:
+        conn = get_connection()
+        cur = conn.cursor()
 
-    conn = get_connection()
-    cur = conn.cursor()
+        agent = data.get("agent")
+        port = data.get("port")
+        berth = data.get("berth")
+        operation_type = data.get("operation_type")
+        products = data.get("products", [])
 
-    cur.execute("SELECT COUNT(*) FROM shipments")
-    count = cur.fetchone()[0] + 1
-    shipment_code = f"SHP{str(count).zfill(3)}"
+        if not agent or not products:
+            return jsonify({"error": "Missing required fields"}), 400
 
-    cur.execute("""
-        INSERT INTO shipments 
-        (shipment_code, agent, port, berth, status, operation_type)
-        VALUES (%s, %s, %s, %s, %s, %s)
-        RETURNING id
-    """, (shipment_code, agent, port, berth, "START", operation_type))
-
-    shipment_id = cur.fetchone()[0]
-
-    for p in products:
-        # product level (keep for summary)
+        # 🔥 CREATE SHIPMENT
         cur.execute("""
-            INSERT INTO shipment_products 
-            (shipment_id, product, total_tonnage, loaded)
+            INSERT INTO shipments (agent, port, berth, status)
             VALUES (%s, %s, %s, %s)
-        """, (
-            shipment_id,
-            p["name"],
-            p["total_tonnage"],
-            0
-        ))
+            RETURNING id
+        """, (agent, port, berth, "ONGOING"))
 
-        # 🔥 NEW: hatch level
-        for h in p.get("hatches", []):
+        shipment_id = cur.fetchone()[0]
+
+        # 🔥 GENERATE SHIPMENT CODE
+        cur.execute("SELECT COUNT(*) FROM shipments")
+        count = cur.fetchone()[0]
+        shipment_code = f"SHP-{str(count).zfill(4)}"
+
+        cur.execute("""
+            UPDATE shipments SET shipment_code=%s WHERE id=%s
+        """, (shipment_code, shipment_id))
+
+        # =========================
+        # 🔥 INSERT PRODUCTS + HATCHES
+        # =========================
+        for p in products:
+            product_name = p.get("name")
+
+            # ✅ SAFE TONNAGE (supports old + new)
+            total_tonnage = p.get("total_tonnage") or p.get("tonnage")
+
+            if total_tonnage is None:
+                raise Exception(f"Tonnage missing for product {product_name}")
+
+            # 🔥 INSERT PRODUCT
             cur.execute("""
-                INSERT INTO shipment_hatches
-                (shipment_id, product, hatch, planned_tonnage, loaded)
-                VALUES (%s, %s, %s, %s, %s)
+                INSERT INTO shipment_products
+                (shipment_id, product, total_tonnage, loaded)
+                VALUES (%s, %s, %s, %s)
             """, (
                 shipment_id,
-                p["name"],
-                h["hatch"],
-                h["planned_tonnage"],
+                product_name,
+                int(total_tonnage),
                 0
             ))
-    conn.commit()
-    cur.close()
-    conn.close()
 
-    return jsonify({
-        "shipment_id": shipment_id,
-        "shipment_code": shipment_code,
-        "operation_type": operation_type  # 🔥 RETURN IT
-    })
+            # 🔥 INSERT HATCHES
+            hatches = p.get("hatches", [])
+
+            for h in hatches:
+                hatch_name = h.get("hatch")
+
+                # ✅ SAFE PLANNED TONNAGE
+                planned = h.get("planned_tonnage") or h.get("tonnage") or 0
+
+                cur.execute("""
+                    INSERT INTO shipment_hatches
+                    (shipment_id, product, hatch, planned_tonnage, loaded)
+                    VALUES (%s, %s, %s, %s, %s)
+                """, (
+                    shipment_id,
+                    product_name,
+                    hatch_name,
+                    int(planned),
+                    0
+                ))
+
+        conn.commit()
+
+        return jsonify({
+            "shipment_id": shipment_id,
+            "shipment_code": shipment_code
+        })
+
+    except Exception as e:
+        traceback.print_exc()  # 🔥 PRINT REAL ERROR IN TERMINAL
+        return jsonify({"error": str(e)}), 500
+
+    finally:
+        cur.close()
+        conn.close()
 
 @app.route('/create_report', methods=['POST'])
 def create_report():
