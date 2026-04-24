@@ -728,7 +728,7 @@ def submit_outturn():
     cur = conn.cursor()
 
     try:
-        # 🔥 SAVE DELAYS (NEW)
+        # 🔥 SAVE DELAYS
         cur.execute("""
             UPDATE shipment_reports
             SET delays = %s
@@ -742,6 +742,7 @@ def submit_outturn():
 
         for item in items:
             product = item['product']
+            hatch = item['hatch']
             tons = int(item['tons'])
             trips = int(item.get('trips', 0))
             gangs = int(item.get('gangs', 0))
@@ -749,7 +750,9 @@ def submit_outturn():
             if tons <= 0:
                 return jsonify({"status": "error", "message": "Invalid tons value"})
 
-            # GET DATA
+            # =========================
+            # 🔍 CHECK PRODUCT BALANCE
+            # =========================
             cur.execute("""
                 SELECT total_tonnage, loaded
                 FROM shipment_products
@@ -769,20 +772,59 @@ def submit_outturn():
                     "message": f"{product} exceeds balance"
                 })
 
-            # INSERT ITEM
+            # =========================
+            # 🔍 CHECK HATCH BALANCE
+            # =========================
+            cur.execute("""
+                SELECT planned_tonnage, loaded
+                FROM shipment_hatches
+                WHERE shipment_id=%s AND product=%s AND hatch=%s
+            """, (data['shipment_id'], product, hatch))
+
+            hatch_data = cur.fetchone()
+
+            if hatch_data:
+                planned, loaded_hatch = hatch_data
+
+                if loaded_hatch + tons > planned:
+                    return jsonify({
+                        "status": "error",
+                        "message": f"{product} {hatch} exceeds hatch balance"
+                    })
+
+            # =========================
+            # ✅ INSERT ITEM
+            # =========================
             cur.execute("""
                 INSERT INTO shipment_report_items
-                (report_id, product, tons, trips, gangs)
-                VALUES (%s, %s, %s, %s, %s)
+                (report_id, product, hatch, tons, trips, gangs)
+                VALUES (%s, %s, %s, %s, %s, %s)
             """, (
                 data['report_db_id'],
                 product,
+                hatch,
                 tons,
                 trips,
                 gangs
             ))
 
-            # UPDATE LOADED
+            # =========================
+            # 🔄 UPDATE HATCH
+            # =========================
+            cur.execute("""
+                UPDATE shipment_hatches
+                SET loaded = loaded + %s
+                WHERE shipment_id=%s AND product=%s AND hatch=%s
+            """, (
+                tons,
+                data['shipment_id'],
+                product,
+                hatch
+            ))
+
+            # =========================
+            # 🔄 UPDATE PRODUCT
+            # =========================
             cur.execute("""
                 UPDATE shipment_products
                 SET loaded = loaded + %s
@@ -793,7 +835,9 @@ def submit_outturn():
                 product
             ))
 
-        # CHECK COMPLETION
+        # =========================
+        # ✅ CHECK COMPLETION
+        # =========================
         cur.execute("""
             SELECT COUNT(*) FROM shipment_products
             WHERE shipment_id=%s AND loaded < total_tonnage
@@ -872,6 +916,90 @@ def get_active_shipments():
 
     return jsonify(result)
 
+@app.route('/get_full_shipment/<int:shipment_id>', methods=['GET'])
+def get_full_shipment(shipment_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        # =========================
+        # PRODUCTS + HATCHES
+        # =========================
+        cur.execute("""
+            SELECT product, hatch, planned_tonnage, loaded
+            FROM shipment_hatches
+            WHERE shipment_id=%s
+        """, (shipment_id,))
+
+        rows = cur.fetchall()
+
+        product_map = {}
+
+        for r in rows:
+            product = r[0]
+            hatch = r[1]
+            planned = r[2]
+
+            if product not in product_map:
+                product_map[product] = {
+                    "name": product,
+                    "total_tonnage": 0,
+                    "hatches": []
+                }
+
+            product_map[product]["hatches"].append({
+                "hatch": hatch,
+                "planned_tonnage": planned
+            })
+
+            product_map[product]["total_tonnage"] += planned
+
+        products = list(product_map.values())
+
+        # =========================
+        # LAST REPORT ITEMS
+        # =========================
+        cur.execute("""
+            SELECT id FROM shipment_reports
+            WHERE shipment_id=%s
+            ORDER BY id DESC LIMIT 1
+        """, (shipment_id,))
+
+        report = cur.fetchone()
+
+        entries = []
+
+        if report:
+            report_id = report[0]
+
+            cur.execute("""
+                SELECT product, hatch, tons, trips, gangs
+                FROM shipment_report_items
+                WHERE report_id=%s
+            """, (report_id,))
+
+            for r in cur.fetchall():
+                entries.append({
+                    "product": r[0],
+                    "hatch": r[1],
+                    "tons": r[2],
+                    "trips": r[3],
+                    "packages": 0,
+                    "gangs": r[4]
+                })
+
+        return jsonify({
+            "products": products,
+            "entries": entries
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
+
 @app.route('/create_shipment', methods=['POST'])
 def create_shipment():
     data = request.json
@@ -899,6 +1027,7 @@ def create_shipment():
     shipment_id = cur.fetchone()[0]
 
     for p in products:
+        # product level (keep for summary)
         cur.execute("""
             INSERT INTO shipment_products 
             (shipment_id, product, total_tonnage, loaded)
@@ -906,10 +1035,23 @@ def create_shipment():
         """, (
             shipment_id,
             p["name"],
-            p["tonnage"],
+            p["total_tonnage"],
             0
         ))
 
+        # 🔥 NEW: hatch level
+        for h in p.get("hatches", []):
+            cur.execute("""
+                INSERT INTO shipment_hatches
+                (shipment_id, product, hatch, planned_tonnage, loaded)
+                VALUES (%s, %s, %s, %s, %s)
+            """, (
+                shipment_id,
+                p["name"],
+                h["hatch"],
+                h["planned_tonnage"],
+                0
+            ))
     conn.commit()
     cur.close()
     conn.close()
