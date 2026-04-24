@@ -1019,23 +1019,19 @@ def create_shipment():
         if not agent or not products:
             return jsonify({"error": "Missing required fields"}), 400
 
-        # 🔥 CREATE SHIPMENT
-        cur.execute("""
-            INSERT INTO shipments (agent, port, berth, status)
-            VALUES (%s, %s, %s, %s)
-            RETURNING id
-        """, (agent, port, berth, "ONGOING"))
-
-        shipment_id = cur.fetchone()[0]
-
-        # 🔥 GENERATE SHIPMENT CODE
+        # 🔥 GENERATE SHIPMENT CODE FIRST
         cur.execute("SELECT COUNT(*) FROM shipments")
         count = cur.fetchone()[0]
-        shipment_code = f"SHP-{str(count).zfill(4)}"
+        shipment_code = f"SHP-{str(count + 1).zfill(4)}"
 
+        # 🔥 INSERT WITH shipment_code ✅
         cur.execute("""
-            UPDATE shipments SET shipment_code=%s WHERE id=%s
-        """, (shipment_code, shipment_id))
+            INSERT INTO shipments (shipment_code, agent, port, berth, status)
+            VALUES (%s, %s, %s, %s, %s)
+            RETURNING id
+        """, (shipment_code, agent, port, berth, "ONGOING"))
+
+        shipment_id = cur.fetchone()[0]
 
         # =========================
         # 🔥 INSERT PRODUCTS + HATCHES
@@ -1043,13 +1039,11 @@ def create_shipment():
         for p in products:
             product_name = p.get("name")
 
-            # ✅ SAFE TONNAGE (supports old + new)
             total_tonnage = p.get("total_tonnage") or p.get("tonnage")
 
             if total_tonnage is None:
                 raise Exception(f"Tonnage missing for product {product_name}")
 
-            # 🔥 INSERT PRODUCT
             cur.execute("""
                 INSERT INTO shipment_products
                 (shipment_id, product, total_tonnage, loaded)
@@ -1061,13 +1055,8 @@ def create_shipment():
                 0
             ))
 
-            # 🔥 INSERT HATCHES
-            hatches = p.get("hatches", [])
-
-            for h in hatches:
+            for h in p.get("hatches", []):
                 hatch_name = h.get("hatch")
-
-                # ✅ SAFE PLANNED TONNAGE
                 planned = h.get("planned_tonnage") or h.get("tonnage") or 0
 
                 cur.execute("""
@@ -1090,7 +1079,7 @@ def create_shipment():
         })
 
     except Exception as e:
-        traceback.print_exc()  # 🔥 PRINT REAL ERROR IN TERMINAL
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
     finally:
