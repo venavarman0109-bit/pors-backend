@@ -390,53 +390,6 @@ def check_report_limit():
 
     return jsonify({"count": count})
 
-@app.route('/add_outturn_report', methods=['POST'])
-def add_outturn_report():
-    data = request.json
-    conn = get_connection()
-    cur = conn.cursor()
-
-    # Insert main report
-    cur.execute("""
-        INSERT INTO outturn_reports
-        (vessel_name, port, berth, report_date, report_time, agent, created_by, delays, remarks)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-        RETURNING id
-    """, (
-        data['vessel_name'],
-        data['port'],
-        data['berth'],
-        data['date'],
-        data['time'],
-        data['agent'],
-        data['created_by'],
-        data['delays'],
-        data['remarks']
-    ))
-
-    report_id = cur.fetchone()[0]
-
-    # Insert items
-    for item in data['items']:
-        cur.execute("""
-            INSERT INTO outturn_report_items
-            (report_id, hatch, gangs, product, lorry_trips, tons)
-            VALUES (%s,%s,%s,%s,%s,%s)
-        """, (
-            report_id,
-            item['hatch'],
-            item['gangs'],
-            item['product'],
-            item['lorry_trips'],
-            item['tons']
-        ))
-
-    conn.commit()
-    cur.close()
-    conn.close()
-
-    return jsonify({"status": "added"})
-
 @app.route('/get_products', methods=['GET'])
 def get_products():
     conn = get_connection()
@@ -982,6 +935,7 @@ def get_full_shipment(shipment_id):
 @app.route('/create_shipment', methods=['POST'])
 def create_shipment():
     import traceback
+    from datetime import datetime
 
     data = request.json
 
@@ -989,30 +943,72 @@ def create_shipment():
         conn = get_connection()
         cur = conn.cursor()
 
+        # ================= GET DATA =================
         agent = data.get("agent")
         port = data.get("port")
         berth = data.get("berth")
         operation_type = data.get("operation_type")
+
+        start_date = data.get("start_date")
+        start_time = data.get("start_time")
+
+        tally_clerk = data.get("tally_clerk")
+
         products = data.get("products", [])
 
-        if not agent or not products:
+        # 🔥 OPTIONAL (AUTO SUPERVISOR FROM USER SESSION)
+        supervisor_name = data.get("created_by", "Supervisor")
+
+        # ================= VALIDATION =================
+        if not all([agent, port, berth, operation_type, tally_clerk]):
             return jsonify({"error": "Missing required fields"}), 400
 
-        # 🔥 GENERATE SHIPMENT CODE
+        if not products:
+            return jsonify({"error": "No products provided"}), 400
+
+        # ================= GENERATE CODE =================
         cur.execute("SELECT COUNT(*) FROM shipments")
         count = cur.fetchone()[0]
         shipment_code = f"SHP-{str(count + 1).zfill(4)}"
 
-        # 🔥 INSERT SHIPMENT
+        # ================= FORMAT DATETIME =================
+        start_datetime = None
+        if start_date and start_time:
+            start_datetime = datetime.strptime(
+                f"{start_date} {start_time}",
+                "%Y-%m-%d %H:%M"
+            )
+
+        # ================= INSERT SHIPMENT =================
         cur.execute("""
-            INSERT INTO shipments (shipment_code, agent, port, berth, status)
-            VALUES (%s, %s, %s, %s, %s)
+            INSERT INTO shipments (
+                shipment_code,
+                agent,
+                port,
+                berth,
+                operation_type,
+                start_datetime,
+                assigned_clerk,
+                supervisor_name,
+                status
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
-        """, (shipment_code, agent, port, berth, "ONGOING"))
+        """, (
+            shipment_code,
+            agent,
+            port,
+            berth,
+            operation_type,
+            start_datetime,
+            tally_clerk,
+            supervisor_name,
+            "ONGOING"
+        ))
 
         shipment_id = cur.fetchone()[0]
 
-        # 🔥 INSERT PRODUCTS + HATCHES
+        # ================= PRODUCTS + HATCHES =================
         for p in products:
             product_name = p.get("name")
             total_tonnage = p.get("total_tonnage")
@@ -1020,7 +1016,7 @@ def create_shipment():
             if total_tonnage is None:
                 raise Exception(f"Tonnage missing for product {product_name}")
 
-            # ✅ PRODUCT TABLE
+            # 🔹 PRODUCT TABLE
             cur.execute("""
                 INSERT INTO shipment_products
                 (shipment_id, product, total_tonnage, loaded)
@@ -1028,11 +1024,11 @@ def create_shipment():
             """, (
                 shipment_id,
                 product_name,
-                int(total_tonnage),
+                float(total_tonnage),
                 0
             ))
 
-            # ✅ HATCH TABLE (NO TONNAGE)
+            # 🔹 HATCH TABLE
             for hatch in p.get("hatches", []):
                 cur.execute("""
                     INSERT INTO shipment_hatches
@@ -1048,7 +1044,8 @@ def create_shipment():
 
         return jsonify({
             "shipment_id": shipment_id,
-            "shipment_code": shipment_code
+            "shipment_code": shipment_code,
+            "status": "success"
         })
 
     except Exception as e:
@@ -1099,6 +1096,72 @@ def create_report():
         "report_id": report_id,
         "report_db_id": report_db_id
     })
+
+@app.route('/get_tally_clerks', methods=['GET'])
+def get_tally_clerks():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT username FROM users_v2
+            WHERE role ILIKE '%tally%'
+        """)
+
+        clerks = [r[0] for r in cur.fetchall()]
+
+        return jsonify({"clerks": clerks})
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route('/get_setup_data', methods=['GET'])
+def get_setup_data():
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        # AGENTS
+        cur.execute("""
+            SELECT username FROM users_v2
+            WHERE role ILIKE '%agent%'
+        """)
+        agents = [r[0] for r in cur.fetchall()]
+
+        # PORTS
+        cur.execute("SELECT name FROM ports ORDER BY name")
+        ports = [r[0] for r in cur.fetchall()]
+
+        return jsonify({
+            "agents": agents,
+            "ports": ports
+        })
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route('/get_berths/<port>', methods=['GET'])
+def get_berths_by_port(port):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT b.name
+            FROM berths b
+            JOIN ports p ON b.port_id = p.id
+            WHERE p.name=%s
+        """, (port,))
+
+        berths = [r[0] for r in cur.fetchall()]
+
+        return jsonify({"berths": berths})
+
+    finally:
+        cur.close()
+        conn.close()
 
 
 # 🔓 LOGOUT
