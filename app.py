@@ -979,7 +979,8 @@ def create_shipment():
                     f"{start_date} {start_time}",
                     "%Y-%m-%d %H:%M:%S"
                 )
-            except:
+            except Exception as e:
+                print("DATETIME ERROR:", e)
                 start_datetime = None
 
         # ================= INSERT SHIPMENT =================
@@ -1165,7 +1166,6 @@ def get_berths_by_port(port):
     finally:
         cur.close()
         conn.close()
-
 
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
