@@ -974,10 +974,13 @@ def create_shipment():
         # ================= FORMAT DATETIME =================
         start_datetime = None
         if start_date and start_time:
-            start_datetime = datetime.strptime(
-                f"{start_date} {start_time}",
-                "%Y-%m-%d %H:%M"
-            )
+            try:
+                start_datetime = datetime.strptime(
+                    f"{start_date} {start_time}",
+                    "%Y-%m-%d %H:%M:%S"
+                )
+            except:
+                start_datetime = None
 
         # ================= INSERT SHIPMENT =================
         cur.execute("""
