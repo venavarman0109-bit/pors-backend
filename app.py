@@ -818,35 +818,41 @@ def get_shipment_progress(shipment_id):
         cur.close()
         conn.close()
 
-@app.route('/get_active_shipments', methods=['GET'])
+@app.route('/get_active_shipments', methods=['POST'])
 def get_active_shipments():
+    data = request.json
+    username = data.get("username")
+
     conn = get_connection()
     cur = conn.cursor()
 
-    cur.execute("""
-        SELECT id, shipment_code, agent, port, berth, status
-        FROM shipments
-        WHERE status != 'COMPLETED'
-        ORDER BY id DESC
-    """)
+    try:
+        cur.execute("""
+            SELECT id, shipment_code, agent, port, berth, status
+            FROM shipments
+            WHERE status != 'COMPLETED'
+            AND assigned_clerk = %s
+            ORDER BY id DESC
+        """, (username,))
 
-    data = cur.fetchall()
+        rows = cur.fetchall()
 
-    result = []
-    for row in data:
-        result.append({
-            "id": row[0],
-            "shipment_code": row[1],
-            "agent": row[2],
-            "port": row[3],
-            "berth": row[4],
-            "status": row[5]
-        })
+        result = []
+        for r in rows:
+            result.append({
+                "id": r[0],
+                "shipment_code": r[1],
+                "agent": r[2],
+                "port": r[3],
+                "berth": r[4],
+                "status": r[5]
+            })
 
-    cur.close()
-    conn.close()
+        return jsonify(result)
 
-    return jsonify(result)
+    finally:
+        cur.close()
+        conn.close()
 
 @app.route('/get_full_shipment/<int:shipment_id>', methods=['GET'])
 def get_full_shipment(shipment_id):
