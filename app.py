@@ -972,10 +972,6 @@ def create_shipment():
         if not products:
             return jsonify({"error": "No products provided"}), 400
 
-        # ================= GENERATE CODE =================
-        cur.execute("SELECT COUNT(*) FROM shipments")
-        shipment_id = cur.fetchone()[0]
-        shipment_code = f"SHP-{str(shipment_id).zfill(4)}"
 
         cur.execute("""
             UPDATE shipments SET shipment_code=%s WHERE id=%s
@@ -996,7 +992,6 @@ def create_shipment():
         # ================= INSERT SHIPMENT =================
         cur.execute("""
             INSERT INTO shipments (
-                shipment_code,
                 agent,
                 port,
                 berth,
@@ -1006,10 +1001,9 @@ def create_shipment():
                 supervisor_name,
                 status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
-            shipment_code,
             agent,
             port,
             berth,
@@ -1021,6 +1015,14 @@ def create_shipment():
         ))
 
         shipment_id = cur.fetchone()[0]
+
+        shipment_code = f"SHP-{str(shipment_id).zfill(4)}"
+
+        cur.execute("""
+            UPDATE shipments
+            SET shipment_code=%s
+            WHERE id=%s
+        """, (shipment_code, shipment_id))
 
         # ================= PRODUCTS + HATCHES =================
         for p in products:
