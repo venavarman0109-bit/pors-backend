@@ -880,7 +880,7 @@ def get_full_shipment(shipment_id):
         # 🔥 GET PRODUCTS
         # =========================
         cur.execute("""
-            SELECT product, total_tonnage, loaded
+            SELECT product, total_tonnage, total_pcs, loaded
             FROM shipment_products
             WHERE shipment_id=%s
         """, (shipment_id,))
@@ -903,10 +903,11 @@ def get_full_shipment(shipment_id):
         # =========================
         product_map = {}
 
-        for product, total, loaded in product_rows:
+        for product, total, total_pcs, loaded in product_rows:
             product_map[product] = {
                 "name": product,
                 "total_tonnage": float(total),
+                "total_pcs": float(total_pcs),  # 🔥 ADD THIS
                 "total_loaded": float(loaded),
                 "balance": float(total) - float(loaded),
                 "hatches": []
