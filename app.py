@@ -1070,6 +1070,36 @@ def create_shipment():
         cur.close()
         conn.close()
 
+@app.route('/get_next_form/<int:shipment_id>')
+def get_next_form(shipment_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    # Count existing forms
+    cur.execute("""
+        SELECT COUNT(*) FROM outturn_forms
+        WHERE shipment_id = %s
+    """, (shipment_id,))
+
+    count = cur.fetchone()[0]
+
+    form_no = count + 1
+
+    # Get shipment_code
+    cur.execute("""
+        SELECT shipment_code FROM shipments
+        WHERE id = %s
+    """, (shipment_id,))
+
+    shipment_code = cur.fetchone()[0]
+
+    form_code = f"{shipment_code}-{str(form_no).zfill(2)}"
+
+    return jsonify({
+        "form_no": form_no,
+        "form_code": form_code
+    })
+
 @app.route('/create_report', methods=['POST'])
 def create_report():
     data = request.json
