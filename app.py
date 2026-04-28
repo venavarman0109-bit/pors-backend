@@ -972,11 +972,6 @@ def create_shipment():
         if not products:
             return jsonify({"error": "No products provided"}), 400
 
-
-        cur.execute("""
-            UPDATE shipments SET shipment_code=%s WHERE id=%s
-        """, (shipment_code, shipment_id))
-
         # ================= FORMAT DATETIME =================
         start_datetime = None
         if start_date and start_time:
