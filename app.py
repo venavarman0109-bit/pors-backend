@@ -974,8 +974,12 @@ def create_shipment():
 
         # ================= GENERATE CODE =================
         cur.execute("SELECT COUNT(*) FROM shipments")
-        count = cur.fetchone()[0]
-        shipment_code = f"SHP-{str(count + 1).zfill(4)}"
+        shipment_id = cur.fetchone()[0]
+        shipment_code = f"SHP-{str(shipment_id).zfill(4)}"
+
+        cur.execute("""
+            UPDATE shipments SET shipment_code=%s WHERE id=%s
+        """, (shipment_code, shipment_id))
 
         # ================= FORMAT DATETIME =================
         start_datetime = None
@@ -983,7 +987,7 @@ def create_shipment():
             try:
                 start_datetime = datetime.strptime(
                     f"{start_date} {start_time}",
-                    "%Y-%m-%d %H:%M:%S"
+                    "%Y-%m-%d %H:%M"
                 )
             except Exception as e:
                 print("DATETIME ERROR:", e)
@@ -1027,14 +1031,17 @@ def create_shipment():
                 raise Exception(f"Tonnage missing for product {product_name}")
 
             # 🔹 PRODUCT TABLE
+            total_pcs = p.get("total_pcs", 0)
+
             cur.execute("""
                 INSERT INTO shipment_products
-                (shipment_id, product, total_tonnage, loaded)
-                VALUES (%s, %s, %s, %s)
+                (shipment_id, product, total_tonnage, total_pcs, loaded)
+                VALUES (%s, %s, %s, %s, %s)
             """, (
                 shipment_id,
                 product_name,
                 float(total_tonnage),
+                float(total_pcs),  # 🔥 NEW
                 0
             ))
 
