@@ -780,8 +780,18 @@ def submit_outturn():
         })
 
     except Exception as e:
+        import traceback
+
         conn.rollback()
-        return jsonify({"status": "error", "message": str(e)})
+
+        print("\n===== SUBMIT OUTTURN ERROR =====")
+        print(traceback.format_exc())
+        print("================================\n")
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
 
     finally:
         cur.close()
