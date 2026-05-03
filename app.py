@@ -707,7 +707,7 @@ def submit_outturn():
             hatch = op['hatch']
             tons = float(op['tons'])
             trips = int(op.get('trips', 0))
-            gangs = int(op.get('gangs', 0))
+            gangs = str(op.get('gangs', ''))
 
             if tons <= 0:
                 return jsonify({"status": "error", "message": "Invalid tons"})
