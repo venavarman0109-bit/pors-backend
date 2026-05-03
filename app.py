@@ -683,6 +683,7 @@ def submit_outturn():
         operations = data.get("operations", [])
         delays = data.get("delays", [])
         remarks = data.get("remarks", [])
+        vessel_name = data.get("vessel_name", "")
 
         if not operations:
             return jsonify({"status": "error", "message": "No operations provided"})
@@ -690,14 +691,15 @@ def submit_outturn():
         # 🔥 CREATE REPORT ENTRY
         cur.execute("""
             INSERT INTO shipment_reports
-            (shipment_id, date, delays, remarks)
-            VALUES (%s, NOW(), %s, %s)
+            (shipment_id, date, delays, remarks, vessel_name)
+            VALUES (%s, NOW(), %s, %s, %s)
             RETURNING id
         """, (
             shipment_id,
             json.dumps(delays),
-            json.dumps(remarks)
-        ))
+            json.dumps(remarks),
+            vessel_name
+            ))
 
         report_id = cur.fetchone()[0]
 
@@ -708,6 +710,7 @@ def submit_outturn():
             tons = float(op['tons'])
             trips = int(op.get('trips', 0))
             gangs = str(op.get('gangs', ''))
+            mode = op.get('mode', 'LORRY')
 
             if tons <= 0:
                 return jsonify({"status": "error", "message": "Invalid tons"})
@@ -735,15 +738,16 @@ def submit_outturn():
             # ✅ INSERT OPERATION
             cur.execute("""
                 INSERT INTO shipment_report_items
-                (report_id, product, hatch, tons, trips, gangs)
-                VALUES (%s, %s, %s, %s, %s, %s)
+                (report_id, product, hatch, tons, trips, gangs, mode)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
             """, (
                 report_id,
                 product,
                 hatch,
                 tons,
                 trips,
-                gangs
+                gangs,
+                mode
             ))
 
             # 🔄 UPDATE PRODUCT TOTAL
@@ -799,30 +803,74 @@ def submit_outturn():
 
 @app.route('/get_shipment_progress/<int:shipment_id>', methods=['GET'])
 def get_shipment_progress(shipment_id):
+
     conn = get_connection()
     cur = conn.cursor()
 
     try:
+
+        # ================= PRODUCT TOTALS =================
         cur.execute("""
-            SELECT product, hatch, loaded
+            SELECT
+                product,
+                hatch,
+                loaded
             FROM shipment_hatches
             WHERE shipment_id=%s
         """, (shipment_id,))
 
-        rows = cur.fetchall()
+        hatch_rows = cur.fetchall()
 
-        result = {}
+        progress = {}
 
-        for product, hatch, loaded in rows:
-            if product not in result:
-                result[product] = {}
+        for product, hatch, loaded in hatch_rows:
 
-            result[product][hatch] = loaded
+            if product not in progress:
+                progress[product] = {}
 
-        return jsonify(result)
+            progress[product][hatch] = loaded
+
+        # ================= ALL OPERATIONS =================
+        cur.execute("""
+            operations.append({
+                "hatch": row[0],
+                "gangs": row[1],
+                "product": row[2],
+                "tons": float(row[3]),
+                "trips": row[4],
+                "mode": row[5]
+            })
+            FROM shipment_report_items sri
+            JOIN shipment_reports sr
+                ON sri.report_id = sr.id
+            WHERE sr.shipment_id = %s
+            ORDER BY sri.id
+        """, (shipment_id,))
+
+        operation_rows = cur.fetchall()
+
+        operations = []
+
+        for row in operation_rows:
+
+            operations.append({
+                "hatch": row[0],
+                "gangs": row[1],
+                "product": row[2],
+                "tons": float(row[3]),
+                "trips": row[4]
+            })
+
+        return jsonify({
+            "progress": progress,
+            "operations": operations
+        })
 
     except Exception as e:
-        return jsonify({"error": str(e)})
+
+        return jsonify({
+            "error": str(e)
+        })
 
     finally:
         cur.close()
@@ -1084,43 +1132,56 @@ def create_shipment():
 
 @app.route('/get_next_form/<int:shipment_id>')
 def get_next_form(shipment_id):
-    from datetime import timedelta
 
     conn = get_connection()
     cur = conn.cursor()
 
-    # 1️⃣ Get shipment start time
-    cur.execute("""
-        SELECT shipment_code, start_datetime
-        FROM shipments
-        WHERE id = %s
-    """, (shipment_id,))
+    try:
 
-    result = cur.fetchone()
-    shipment_code, base_start = result
+        # 🔥 GET SHIPMENT CODE
+        cur.execute("""
+            SELECT shipment_code
+            FROM shipments
+            WHERE id = %s
+        """, (shipment_id,))
 
-    # 2️⃣ Count existing forms
-    cur.execute("""
-        SELECT COUNT(*) FROM outturn_forms
-        WHERE shipment_id = %s
-    """, (shipment_id,))
+        shipment = cur.fetchone()
 
-    count = cur.fetchone()[0]
-    form_no = count + 1
+        if not shipment:
+            return jsonify({"error": "Shipment not found"})
 
-    # 3️⃣ CALCULATE TIME
-    start_time = base_start + timedelta(hours=8 * count)
-    end_time = start_time + timedelta(hours=8)
+        shipment_code = shipment[0]
 
-    # 4️⃣ FORM CODE
-    form_code = f"{shipment_code}-{str(form_no).zfill(2)}"
+        # 🔥 COUNT EXISTING REPORTS
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM shipment_reports
+            WHERE shipment_id = %s
+        """, (shipment_id,))
 
-    return jsonify({
-        "form_no": form_no,
-        "form_code": form_code,
-        "start_time": start_time.strftime("%Y-%m-%d %H:%M"),
-        "end_time": end_time.strftime("%Y-%m-%d %H:%M")
-    })
+        count = cur.fetchone()[0]
+
+        next_no = count + 1
+
+        form_code = f"{shipment_code}-{next_no:02d}"
+
+        from datetime import datetime
+
+        now = datetime.now()
+
+        return jsonify({
+            "form_no": next_no,
+            "form_code": form_code,
+            "start_time": now.strftime("%Y-%m-%d %H:%M"),
+            "end_time": now.strftime("%Y-%m-%d %H:%M")
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
 
 @app.route('/create_report', methods=['POST'])
 def create_report():
@@ -1224,6 +1285,38 @@ def get_berths_by_port(port):
         berths = [r[0] for r in cur.fetchall()]
 
         return jsonify({"berths": berths})
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route('/get_last_report/<int:shipment_id>')
+def get_last_report(shipment_id):
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+
+        cur.execute("""
+            SELECT vessel_name
+            FROM shipment_reports
+            WHERE shipment_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+        """, (shipment_id,))
+
+        row = cur.fetchone()
+
+        if not row:
+            return jsonify({})
+
+        return jsonify({
+            "vessel_name": row[0] or ""
+        })
+
+    except Exception as e:
+        return jsonify({"error": str(e)})
 
     finally:
         cur.close()
