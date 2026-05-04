@@ -10,7 +10,7 @@ def get_connection():
         host="aws-1-ap-southeast-1.pooler.supabase.com",
         database="postgres",
         user="postgres.iedizehssmyerdbwxcly",
-        password="U6j4GsQKY9P1VtBX",
+        password="TyAyV7r01NPtJwSE",
         port="6543"
     )
 
@@ -675,6 +675,9 @@ def submit_outturn():
     data = request.json
     import json
 
+    start_time = data.get("start_time")
+    end_time = data.get("end_time")
+
     conn = get_connection()
     cur = conn.cursor()
 
@@ -691,14 +694,16 @@ def submit_outturn():
         # 🔥 CREATE REPORT ENTRY
         cur.execute("""
             INSERT INTO shipment_reports
-            (shipment_id, date, delays, remarks, vessel_name)
-            VALUES (%s, NOW(), %s, %s, %s)
+            (shipment_id, date, start_time, end_time, delays, remarks, vessel_name)
+            VALUES (%s, NOW(), %s, %s, %s, %s, %s)
             RETURNING id
         """, (
-            shipment_id,
-            json.dumps(delays),
-            json.dumps(remarks),
-            vessel_name
+                shipment_id,
+                start_time,
+                end_time,
+                json.dumps(delays),
+                json.dumps(remarks),
+                vessel_name
             ))
 
         report_id = cur.fetchone()[0]
@@ -832,14 +837,13 @@ def get_shipment_progress(shipment_id):
 
         # ================= ALL OPERATIONS =================
         cur.execute("""
-            operations.append({
-                "hatch": row[0],
-                "gangs": row[1],
-                "product": row[2],
-                "tons": float(row[3]),
-                "trips": row[4],
-                "mode": row[5]
-            })
+            SELECT
+                sri.hatch,
+                sri.gangs,
+                sri.product,
+                sri.tons,
+                sri.trips,
+                sri.mode
             FROM shipment_report_items sri
             JOIN shipment_reports sr
                 ON sri.report_id = sr.id
@@ -852,13 +856,13 @@ def get_shipment_progress(shipment_id):
         operations = []
 
         for row in operation_rows:
-
             operations.append({
                 "hatch": row[0],
                 "gangs": row[1],
                 "product": row[2],
                 "tons": float(row[3]),
-                "trips": row[4]
+                "trips": row[4],
+                "mode": row[5]
             })
 
         return jsonify({
@@ -1165,15 +1169,40 @@ def get_next_form(shipment_id):
 
         form_code = f"{shipment_code}-{next_no:02d}"
 
-        from datetime import datetime
+        from datetime import datetime, timedelta
 
-        now = datetime.now()
+        # 🔥 GET LAST REPORT END TIME
+        cur.execute("""
+            SELECT end_time
+            FROM shipment_reports
+            WHERE shipment_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+        """, (shipment_id,))
+
+        last = cur.fetchone()
+
+        if last and last[0]:
+            start_dt = last[0]
+        else:
+            # FIRST REPORT → USE SHIPMENT START TIME
+            cur.execute("""
+                SELECT start_datetime
+                FROM shipments
+                WHERE id = %s
+            """, (shipment_id,))
+
+            shipment_start = cur.fetchone()
+            start_dt = shipment_start[0] if shipment_start and shipment_start[0] else datetime.now()
+
+        # 🔥 ADD 8 HOURS
+        end_dt = start_dt + timedelta(hours=8)
 
         return jsonify({
             "form_no": next_no,
             "form_code": form_code,
-            "start_time": now.strftime("%Y-%m-%d %H:%M"),
-            "end_time": now.strftime("%Y-%m-%d %H:%M")
+            "start_time": start_dt.strftime("%Y-%m-%d %H:%M"),
+            "end_time": end_dt.strftime("%Y-%m-%d %H:%M")
         })
 
     except Exception as e:
