@@ -1,18 +1,20 @@
 from flask import Flask, request, jsonify
-import psycopg2
 import random
 from datetime import datetime
 
 app = Flask(__name__)
 
 # 🔥 DB CONNECTION
+import os
+import psycopg2
+
 def get_connection():
     return psycopg2.connect(
-        host="aws-1-ap-southeast-1.pooler.supabase.com",
-        database="postgres",
-        user="postgres.iedizehssmyerdbwxcly",
-        password="TyAyV7r01NPtJwSE",
-        port="6543"
+        host=os.environ.get("DB_HOST"),
+        port=os.environ.get("DB_PORT"),
+        dbname=os.environ.get("DB_NAME"),
+        user=os.environ.get("DB_USER"),
+        password=os.environ.get("DB_PASSWORD")
     )
 
 # 🔥 GENERATE STAFF ID
