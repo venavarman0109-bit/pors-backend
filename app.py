@@ -8,15 +8,7 @@ app = Flask(__name__)
 
 # 🔥 DB CONNECTION
 def get_connection():
-    return psycopg2.connect(
-        host=os.environ.get("DB_HOST"),
-        port=os.environ.get("DB_PORT"),
-        dbname=os.environ.get("DB_NAME"),
-        user=os.environ.get("DB_USER"),
-        password=os.environ.get("DB_PASSWORD"),
-        sslmode="require"   # ✅ THIS FIXES YOUR ERROR
-    )
-
+    return psycopg2.connect(os.environ.get("DATABASE_URL"))
 # 🔥 GENERATE STAFF ID
 def generate_staff_id(role):
     prefix_map = {
