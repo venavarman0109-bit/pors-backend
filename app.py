@@ -59,39 +59,54 @@ def home():
 # 🔐 LOGIN
 @app.route('/login', methods=['POST'])
 def login():
-    data = request.json
+    import traceback
 
-    if not data.get("username") or not data.get("password"):
+    try:
+        data = request.json
+
+        if not data.get("username") or not data.get("password"):
+            return jsonify({"status": "fail"})
+
+        conn = get_connection()
+        cur = conn.cursor()
+
+        cur.execute(
+            "SELECT role FROM users_v2 WHERE username=%s AND password=%s",
+            (data['username'], data['password'])
+        )
+
+        result = cur.fetchone()
+
+        if result:
+            cur.execute(
+                "UPDATE users_v2 SET login_time = NOW() WHERE username=%s",
+                (data['username'],)
+            )
+            conn.commit()
+
+            return jsonify({
+                "status": "success",
+                "role": result[0]
+            })
+
         return jsonify({"status": "fail"})
 
-    conn = get_connection()
-    cur = conn.cursor()
-
-    cur.execute(
-        "SELECT role FROM users_v2 WHERE username=%s AND password=%s",
-        (data['username'], data['password'])
-    )
-
-    result = cur.fetchone()
-
-    if result:
-        cur.execute(
-            "UPDATE users_v2 SET login_time = NOW() WHERE username=%s",
-            (data['username'],)
-        )
-        conn.commit()
-
-        cur.close()
-        conn.close()
+    except Exception as e:
+        print("🔥 LOGIN ERROR START 🔥")
+        print(traceback.format_exc())
+        print("🔥 LOGIN ERROR END 🔥")
 
         return jsonify({
-            "status": "success",
-            "role": result[0]
+            "status": "error",
+            "message": str(e)
         })
 
-    cur.close()
-    conn.close()
-    return jsonify({"status": "fail"})
+    finally:
+        try:
+            cur.close()
+            conn.close()
+        except:
+            pass
 
 
 # ➕ ADD USER
