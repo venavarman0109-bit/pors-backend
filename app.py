@@ -692,19 +692,22 @@ def submit_outturn():
             return jsonify({"status": "error", "message": "No operations provided"})
 
         # 🔥 CREATE REPORT ENTRY
+        current_date = datetime.now().strftime("%Y-%m-%d")
+
         cur.execute("""
             INSERT INTO shipment_reports
             (shipment_id, date, start_time, end_time, delays, remarks, vessel_name)
-            VALUES (%s, NOW(), %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
-                shipment_id,
-                start_time,
-                end_time,
-                json.dumps(delays),
-                json.dumps(remarks),
-                vessel_name
-            ))
+            shipment_id,
+            current_date,
+            start_time,
+            end_time,
+            json.dumps(delays),
+            json.dumps(remarks),
+            vessel_name
+        ))
 
         report_id = cur.fetchone()[0]
 
