@@ -59,13 +59,8 @@ def home():
 # 🔐 LOGIN
 @app.route('/login', methods=['POST'])
 def login():
-    import traceback
-
     try:
         data = request.json
-
-        if not data.get("username") or not data.get("password"):
-            return jsonify({"status": "fail"})
 
         conn = get_connection()
         cur = conn.cursor()
@@ -78,12 +73,6 @@ def login():
         result = cur.fetchone()
 
         if result:
-            cur.execute(
-                "UPDATE users_v2 SET login_time = NOW() WHERE username=%s",
-                (data['username'],)
-            )
-            conn.commit()
-
             return jsonify({
                 "status": "success",
                 "role": result[0]
@@ -92,22 +81,11 @@ def login():
         return jsonify({"status": "fail"})
 
     except Exception as e:
-        print("🔥 LOGIN ERROR START 🔥")
-        print(traceback.format_exc())
-        print("🔥 LOGIN ERROR END 🔥")
-
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        })
+        return jsonify({"status": "error", "message": str(e)})
 
     finally:
-        try:
-            cur.close()
-            conn.close()
-        except:
-            pass
-
+        cur.close()
+        conn.close()
 
 # ➕ ADD USER
 @app.route('/add_user', methods=['POST'])
