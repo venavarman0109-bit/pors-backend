@@ -1351,6 +1351,121 @@ def get_last_report(shipment_id):
         cur.close()
         conn.close()
 
+@app.route('/get_all_shipments', methods=['GET'])
+def get_all_shipments():
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT id, shipment_code, agent, port, berth, operation_type, status
+        FROM shipments
+        WHERE status != 'DELETED'
+        ORDER BY id DESC
+    """)
+
+    rows = cur.fetchall()
+
+    result = []
+    for r in rows:
+        result.append({
+            "id": r[0],
+            "shipment_code": r[1],
+            "agent": r[2],
+            "port": r[3],
+            "berth": r[4],
+            "operation_type": r[5],
+            "status": r[6]
+        })
+
+    cur.close()
+    conn.close()
+
+    return jsonify(result)
+
+def has_reports(cur, shipment_id):
+    cur.execute("""
+        SELECT COUNT(*) FROM shipment_reports
+        WHERE shipment_id = %s
+    """, (shipment_id,))
+    return cur.fetchone()[0] > 0
+
+@app.route('/update_shipment', methods=['POST'])
+def update_shipment():
+
+    data = request.json
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        shipment_id = data.get("shipment_id")
+
+        # 🔥 CHECK REPORT EXISTENCE
+        report_exists = has_reports(cur, shipment_id)
+
+        if not report_exists:
+            # ✅ FULL EDIT
+            cur.execute("""
+                UPDATE shipments
+                SET agent=%s, port=%s, berth=%s, operation_type=%s, assigned_clerk=%s
+                WHERE id=%s
+            """, (
+                data.get("agent"),
+                data.get("port"),
+                data.get("berth"),
+                data.get("operation_type"),
+                data.get("assigned_clerk"),
+                shipment_id
+            ))
+
+        else:
+            # 🔒 LIMITED EDIT
+            cur.execute("""
+                UPDATE shipments
+                SET assigned_clerk=%s
+                WHERE id=%s
+            """, (
+                data.get("assigned_clerk"),
+                shipment_id
+            ))
+
+        conn.commit()
+        return jsonify({"status": "updated"})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route('/delete_shipment', methods=['POST'])
+def delete_shipment():
+
+    data = request.json
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        shipment_id = data.get("shipment_id")
+
+        cur.execute("""
+            UPDATE shipments
+            SET status = 'DELETED'
+            WHERE id = %s
+        """, (shipment_id,))
+
+        conn.commit()
+
+        return jsonify({"status": "deleted"})
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
