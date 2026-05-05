@@ -1,20 +1,20 @@
 from flask import Flask, request, jsonify
 import random
+import os
+import psycopg2
 from datetime import datetime
 
 app = Flask(__name__)
 
 # 🔥 DB CONNECTION
-import os
-import psycopg2
-
 def get_connection():
     return psycopg2.connect(
         host=os.environ.get("DB_HOST"),
         port=os.environ.get("DB_PORT"),
         dbname=os.environ.get("DB_NAME"),
         user=os.environ.get("DB_USER"),
-        password=os.environ.get("DB_PASSWORD")
+        password=os.environ.get("DB_PASSWORD"),
+        sslmode="require"   # ✅ THIS FIXES YOUR ERROR
     )
 
 # 🔥 GENERATE STAFF ID
