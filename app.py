@@ -62,6 +62,9 @@ def home():
 # 🔐 LOGIN
 @app.route('/login', methods=['POST'])
 def login():
+    conn = None
+    cur = None
+
     try:
         data = request.json
 
@@ -84,11 +87,14 @@ def login():
         return jsonify({"status": "fail"})
 
     except Exception as e:
+        print("LOGIN ERROR:", str(e))  # 🔥 VERY IMPORTANT
         return jsonify({"status": "error", "message": str(e)})
 
     finally:
-        cur.close()
-        conn.close()
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 # ➕ ADD USER
 @app.route('/add_user', methods=['POST'])
