@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 import psycopg2
 import random
+from datetime import datetime
 
 app = Flask(__name__)
 
@@ -670,6 +671,12 @@ def submit_outturn():
 
     start_time = data.get("start_time")
     end_time = data.get("end_time")
+
+    if not start_time or not end_time:
+        return jsonify({
+            "status": "error",
+            "message": "Start time and End time are required"
+        })
 
     conn = get_connection()
     cur = conn.cursor()
