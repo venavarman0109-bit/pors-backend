@@ -68,15 +68,21 @@ def login():
     try:
         data = request.json
 
+        username = data['username'].strip()
+        password = data['password'].strip()
+
+        print("LOGIN:", username, password)
+
         conn = get_connection()
         cur = conn.cursor()
 
-        cur.execute(
-            "SELECT role FROM users_v2 WHERE username=%s AND password=%s",
-            (data['username'], data['password'])
-        )
+        cur.execute("""
+            SELECT role FROM users_v2 
+            WHERE LOWER(username)=LOWER(%s) AND password=%s
+        """, (username, password))
 
         result = cur.fetchone()
+        print("RESULT:", result)
 
         if result:
             return jsonify({
@@ -87,7 +93,7 @@ def login():
         return jsonify({"status": "fail"})
 
     except Exception as e:
-        print("LOGIN ERROR:", str(e))  # 🔥 VERY IMPORTANT
+        print("LOGIN ERROR:", str(e))
         return jsonify({"status": "error", "message": str(e)})
 
     finally:
@@ -95,6 +101,7 @@ def login():
             cur.close()
         if conn:
             conn.close()
+
 
 # ➕ ADD USER
 @app.route('/add_user', methods=['POST'])
