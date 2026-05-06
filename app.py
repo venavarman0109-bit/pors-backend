@@ -1194,7 +1194,7 @@ def get_next_form(shipment_id):
 
         next_no = count + 1
 
-        form_code = f"{shipment_code}-{next_no:02d}"
+        report_code = f"{shipment_code}-{next_no:02d}"
 
         from datetime import datetime, timedelta
 
@@ -1212,7 +1212,7 @@ def get_next_form(shipment_id):
         if last and last[0]:
             start_dt = last[0]
         else:
-            # FIRST REPORT → USE SHIPMENT START TIME
+            # FIRST REPORT
             cur.execute("""
                 SELECT start_datetime
                 FROM shipments
@@ -1220,14 +1220,24 @@ def get_next_form(shipment_id):
             """, (shipment_id,))
 
             shipment_start = cur.fetchone()
-            start_dt = shipment_start[0] if shipment_start and shipment_start[0] else datetime.now()
 
-        # 🔥 ADD 8 HOURS
+            start_dt = (
+                shipment_start[0]
+                if shipment_start and shipment_start[0]
+                else datetime.now()
+            )
+
+        # 🔥 AUTO +8 HOURS
         end_dt = start_dt + timedelta(hours=8)
 
         return jsonify({
+            "report_no": next_no,
+            "report_id": report_code,
+
+            # TEMPORARY BACKWARD COMPATIBILITY
             "form_no": next_no,
-            "form_code": form_code,
+            "form_code": report_code,
+
             "start_time": start_dt.strftime("%Y-%m-%d %H:%M"),
             "end_time": end_dt.strftime("%Y-%m-%d %H:%M")
         })
