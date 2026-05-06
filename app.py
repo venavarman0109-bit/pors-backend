@@ -700,20 +700,37 @@ def submit_outturn():
 
         # 🔥 CREATE REPORT ENTRY
         current_date = datetime.now().strftime("%Y-%m-%d")
+        created_by = data.get("created_by")
+        report_no = data.get("report_no")
+        report_code = data.get("report_id")
 
         cur.execute("""
             INSERT INTO shipment_reports
-            (shipment_id, date, start_time, end_time, delays, remarks, vessel_name)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+            (
+                shipment_id,
+                report_no,
+                report_id,
+                date,
+                start_time,
+                end_time,
+                delays,
+                remarks,
+                vessel_name,
+                created_by
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             shipment_id,
+            report_no,
+            report_code,
             current_date,
             start_time,
             end_time,
             json.dumps(delays),
             json.dumps(remarks),
-            vessel_name
+            vessel_name,
+            created_by
         ))
 
         report_id = cur.fetchone()[0]
