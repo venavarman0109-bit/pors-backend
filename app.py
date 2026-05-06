@@ -1520,6 +1520,144 @@ def delete_shipment():
         cur.close()
         conn.close()
 
+@app.route('/get_outturn_reports', methods=['POST'])
+def get_outturn_reports():
+
+    data = request.json
+
+    username = data.get("username")
+    role = data.get("role")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+
+        # =========================================
+        # 🔥 ADMIN → VIEW ALL REPORTS
+        # =========================================
+
+        admin_roles = [
+            "System Admin",
+            "Admin Staff",
+            "Director",
+            "Manager",
+            "Supervisor"
+        ]
+
+        if role in admin_roles:
+
+            cur.execute("""
+                SELECT
+                    sr.id,
+                    sr.report_id,
+                    s.shipment_code,
+                    s.agent,
+                    sr.vessel_name,
+                    sr.date,
+                    sr.start_time,
+                    sr.end_time,
+                    sr.created_by,
+                    s.status
+
+                FROM shipment_reports sr
+
+                JOIN shipments s
+                    ON sr.shipment_id = s.id
+
+                ORDER BY sr.id DESC
+            """)
+
+        # =========================================
+        # 🔥 TALLY CLERK → ONLY OWN REPORTS
+        # =========================================
+
+        elif "tally" in role.lower() or "clerk" in role.lower():
+
+            cur.execute("""
+                SELECT
+                    sr.id,
+                    sr.report_id,
+                    s.shipment_code,
+                    s.agent,
+                    sr.vessel_name,
+                    sr.date,
+                    sr.start_time,
+                    sr.end_time,
+                    sr.created_by,
+                    s.status
+
+                FROM shipment_reports sr
+
+                JOIN shipments s
+                    ON sr.shipment_id = s.id
+
+                WHERE LOWER(sr.created_by) = LOWER(%s)
+
+                ORDER BY sr.id DESC
+            """, (username,))
+
+        # =========================================
+        # 🔥 AGENT → ONLY THEIR AGENT REPORTS
+        # =========================================
+
+        else:
+
+            cur.execute("""
+                SELECT
+                    sr.id,
+                    sr.report_id,
+                    s.shipment_code,
+                    s.agent,
+                    sr.vessel_name,
+                    sr.date,
+                    sr.start_time,
+                    sr.end_time,
+                    sr.created_by,
+                    s.status
+
+                FROM shipment_reports sr
+
+                JOIN shipments s
+                    ON sr.shipment_id = s.id
+
+                WHERE LOWER(s.agent) = LOWER(%s)
+
+                ORDER BY sr.id DESC
+            """, (username,))
+
+        rows = cur.fetchall()
+
+        result = []
+
+        for r in rows:
+
+            result.append({
+                "id": r[0],
+                "report_id": r[1],
+                "shipment_code": r[2],
+                "agent": r[3],
+                "vessel_name": r[4],
+                "date": str(r[5]),
+                "start_time": str(r[6]),
+                "end_time": str(r[7]),
+                "created_by": r[8],
+                "status": r[9]
+            })
+
+        return jsonify(result)
+
+    except Exception as e:
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
+
+    finally:
+        cur.close()
+        conn.close()
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
