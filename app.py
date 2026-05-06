@@ -1658,6 +1658,186 @@ def get_outturn_reports():
         cur.close()
         conn.close()
 
+@app.route('/get_report_details/<int:report_db_id>', methods=['GET'])
+def get_report_details(report_db_id):
+
+    import json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+
+        # =========================================
+        # REPORT + SHIPMENT INFO
+        # =========================================
+
+        cur.execute("""
+            SELECT
+                sr.id,
+                sr.report_no,
+                sr.report_id,
+                sr.shipment_id,
+                sr.date,
+                sr.start_time,
+                sr.end_time,
+                sr.delays,
+                sr.remarks,
+                sr.vessel_name,
+                sr.created_by,
+
+                s.shipment_code,
+                s.agent,
+                s.port,
+                s.berth,
+                s.operation_type,
+                s.status
+
+            FROM shipment_reports sr
+
+            JOIN shipments s
+                ON sr.shipment_id = s.id
+
+            WHERE sr.id = %s
+        """, (report_db_id,))
+
+        report = cur.fetchone()
+
+        if not report:
+            return jsonify({"error": "Report not found"})
+
+        (
+            db_id,
+            report_no,
+            report_code,
+            shipment_id,
+            report_date,
+            start_time,
+            end_time,
+            delays,
+            remarks,
+            vessel_name,
+            created_by,
+            shipment_code,
+            agent,
+            port,
+            berth,
+            operation_type,
+            status
+        ) = report
+
+        # =========================================
+        # OPERATIONS
+        # =========================================
+
+        cur.execute("""
+            SELECT
+                product,
+                hatch,
+                pcs,
+                tons,
+                trips,
+                gangs,
+                mode
+
+            FROM shipment_report_items
+
+            WHERE report_id = %s
+        """, (db_id,))
+
+        operation_rows = cur.fetchall()
+
+        operations = []
+
+        for row in operation_rows:
+
+            operations.append({
+                "product": row[0],
+                "hatch": row[1],
+                "pcs": float(row[2]),
+                "tons": float(row[3]),
+                "trips": row[4],
+                "gangs": row[5],
+                "mode": row[6],
+                "pcs_balance": 0,
+                "tons_balance": 0
+            })
+
+        # =========================================
+        # PRODUCTS
+        # =========================================
+
+        cur.execute("""
+            SELECT
+                product,
+                total_tonnage,
+                total_pcs,
+                loaded
+
+            FROM shipment_products
+
+            WHERE shipment_id = %s
+        """, (shipment_id,))
+
+        product_rows = cur.fetchall()
+
+        products = []
+
+        loaded_total = 0
+
+        for p in product_rows:
+
+            loaded_total += float(p[3])
+
+            products.append({
+                "name": p[0],
+                "total_tonnage": float(p[1]),
+                "total_pcs": float(p[2]),
+                "loaded": float(p[3])
+            })
+
+        shipment_data = {
+            "shipment_code": shipment_code,
+            "agent": agent,
+            "port": port,
+            "berth": berth,
+            "operation_type": operation_type,
+            "status": status,
+            "products": products,
+            "loaded_tons": loaded_total,
+            "vessel_name": vessel_name
+        }
+
+        return jsonify({
+            "shipment_id": shipment_id,
+            "shipment_code": shipment_code,
+
+            "form_no": report_no,
+            "form_code": report_code,
+
+            "start_time": start_time,
+            "end_time": end_time,
+
+            "operations": operations,
+            "shipment_data": shipment_data,
+
+            "delays": json.loads(delays) if delays else [],
+            "remarks": json.loads(remarks) if remarks else [],
+
+            "current_user": created_by
+        })
+
+    except Exception as e:
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
+
+    finally:
+        cur.close()
+        conn.close()
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
