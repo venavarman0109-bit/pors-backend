@@ -845,22 +845,25 @@ def get_shipment_progress(shipment_id):
         cur.execute("""
             SELECT
                 product,
-                hatch,
+                total_tonnage,
+                total_pcs,
                 loaded
-            FROM shipment_hatches
+            FROM shipment_products
             WHERE shipment_id=%s
         """, (shipment_id,))
 
-        hatch_rows = cur.fetchall()
+        product_rows = cur.fetchall()
 
         progress = {}
 
-        for product, hatch, loaded in hatch_rows:
+        for product, total_tonnage, total_pcs, loaded in product_rows:
 
-            if product not in progress:
-                progress[product] = {}
-
-            progress[product][hatch] = loaded
+            progress[product] = {
+                "total_tonnage": float(total_tonnage),
+                "total_pcs": float(total_pcs),
+                "loaded": float(loaded),
+                "balance": float(total_tonnage) - float(loaded)
+            }
 
         # ================= ALL OPERATIONS =================
         cur.execute("""
@@ -892,9 +895,28 @@ def get_shipment_progress(shipment_id):
                 "mode": row[5]
             })
 
+        # ================= LAST REPORT =================
+        cur.execute("""
+            SELECT
+                vessel_name
+            FROM shipment_reports
+            WHERE shipment_id = %s
+            ORDER BY id DESC
+            LIMIT 1
+        """, (shipment_id,))
+
+        last_report = cur.fetchone()
+
+        vessel_name = ""
+
+        if last_report:
+            vessel_name = last_report[0] or ""
+
+        # ================= FINAL RESPONSE =================
         return jsonify({
             "progress": progress,
-            "operations": operations
+            "operations": operations,
+            "vessel_name": vessel_name
         })
 
     except Exception as e:
