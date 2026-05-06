@@ -740,6 +740,7 @@ def submit_outturn():
             product = op['product']
             hatch = op['hatch']
             tons = float(op['tons'])
+            pcs = float(op.get('pcs', 0))
             trips = int(op.get('trips', 0))
             gangs = str(op.get('gangs', ''))
             mode = op.get('mode', 'LORRY')
@@ -770,17 +771,18 @@ def submit_outturn():
             # ✅ INSERT OPERATION
             cur.execute("""
                 INSERT INTO shipment_report_items
-                (report_id, product, hatch, tons, trips, gangs, mode)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (report_id, product, hatch, pcs, tons, trips, gangs, mode)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
             """, (
-                report_id,
-                product,
-                hatch,
-                tons,
-                trips,
-                gangs,
-                mode
-            ))
+                    report_id,
+                    product,
+                    hatch,
+                    pcs,
+                    tons,
+                    trips,
+                    gangs,
+                    mode
+                ))
 
             # 🔄 UPDATE PRODUCT TOTAL
             cur.execute("""
@@ -842,59 +844,48 @@ def get_shipment_progress(shipment_id):
     try:
 
         # ================= PRODUCT TOTALS =================
+
         cur.execute("""
             SELECT
-                product,
-                total_tonnage,
-                total_pcs,
-                loaded
-            FROM shipment_products
-            WHERE shipment_id=%s
+                sp.product,
+                sp.total_tonnage,
+                sp.total_pcs,
+                sp.loaded,
+
+                COALESCE(SUM(sri.pcs), 0)
+            FROM shipment_products sp
+
+            LEFT JOIN shipment_reports sr
+                ON sr.shipment_id = sp.shipment_id
+
+            LEFT JOIN shipment_report_items sri
+                ON sri.report_id = sr.id
+                AND sri.product = sp.product
+
+            WHERE sp.shipment_id = %s
+
+            GROUP BY
+                sp.product,
+                sp.total_tonnage,
+                sp.total_pcs,
+                sp.loaded
         """, (shipment_id,))
 
         product_rows = cur.fetchall()
 
         progress = {}
 
-        for product, total_tonnage, total_pcs, loaded in product_rows:
-
+        for product, total_tonnage, total_pcs, loaded_tons, loaded_pcs in product_rows:
             progress[product] = {
                 "total_tonnage": float(total_tonnage),
                 "total_pcs": float(total_pcs),
-                "loaded": float(loaded),
-                "balance": float(total_tonnage) - float(loaded)
+
+                "loaded_tons": float(loaded_tons),
+                "loaded_pcs": float(loaded_pcs),
+
+                "balance_tons": float(total_tonnage) - float(loaded_tons),
+                "balance_pcs": float(total_pcs) - float(loaded_pcs)
             }
-
-        # ================= ALL OPERATIONS =================
-        cur.execute("""
-            SELECT
-                sri.hatch,
-                sri.gangs,
-                sri.product,
-                sri.tons,
-                sri.trips,
-                sri.mode
-            FROM shipment_report_items sri
-            JOIN shipment_reports sr
-                ON sri.report_id = sr.id
-            WHERE sr.shipment_id = %s
-            ORDER BY sri.id
-        """, (shipment_id,))
-
-        operation_rows = cur.fetchall()
-
-        operations = []
-
-        for row in operation_rows:
-            operations.append({
-                "hatch": row[0],
-                "gangs": row[1],
-                "product": row[2],
-                "tons": float(row[3]),
-                "trips": row[4],
-                "mode": row[5]
-            })
-
         # ================= LAST REPORT =================
         cur.execute("""
             SELECT
@@ -915,7 +906,6 @@ def get_shipment_progress(shipment_id):
         # ================= FINAL RESPONSE =================
         return jsonify({
             "progress": progress,
-            "operations": operations,
             "vessel_name": vessel_name
         })
 
