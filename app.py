@@ -1222,7 +1222,12 @@ def get_next_form(shipment_id):
         last = cur.fetchone()
 
         if last and last[0]:
-            start_dt = last[0]
+
+            # Convert string → datetime
+            start_dt = datetime.strptime(
+                last[0],
+                "%Y-%m-%d %H:%M"
+            )
         else:
             # FIRST REPORT
             cur.execute("""
