@@ -1486,6 +1486,48 @@ def get_shipment_edit_details(shipment_id):
         cur.close()
         conn.close()
 
+@app.route('/get_shipment_edit_details/<int:shipment_id>', methods=['GET'])
+def get_shipment_edit_details(shipment_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT id, shipment_code, agent, port, berth, operation_type, assigned_clerk, status
+            FROM shipments
+            WHERE id = %s
+        """, (shipment_id,))
+
+        row = cur.fetchone()
+
+        if not row:
+            return jsonify({
+                "status": "error",
+                "message": "Shipment not found"
+            }), 404
+
+        return jsonify({
+            "id": row[0],
+            "shipment_code": row[1] or "",
+            "agent": row[2] or "",
+            "port": row[3] or "",
+            "berth": row[4] or "",
+            "operation_type": row[5] or "",
+            "assigned_clerk": row[6] or "",
+            "status": row[7] or "",
+            "has_reports": has_reports(cur, shipment_id)
+        })
+
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
 @app.route('/update_shipment', methods=['POST'])
 def update_shipment():
     data = request.json
