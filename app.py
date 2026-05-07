@@ -1442,7 +1442,7 @@ def get_all_shipments():
             status,
             COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
         FROM shipments
-        WHERE status != 'DELETED'
+        WHERE status NOT IN ('DELETED', 'COMPLETED')
         ORDER BY id DESC
     """)
 
