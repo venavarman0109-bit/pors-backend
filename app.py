@@ -929,12 +929,26 @@ def get_active_shipments():
 
     try:
         cur.execute("""
-            SELECT id, shipment_code, agent, port, berth, status
+            SELECT
+                id,
+                shipment_code,
+                agent,
+                port,
+                berth,
+                status,
+                COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
             FROM shipments
             WHERE status != 'COMPLETED'
-            AND assigned_clerk = %s
+            AND (
+                LOWER(COALESCE(assigned_clerk, '')) = LOWER(%s)
+                OR EXISTS (
+                    SELECT 1
+                    FROM unnest(string_to_array(COALESCE(assigned_tally_clerks, ''), ',')) AS clerk
+                    WHERE LOWER(TRIM(clerk)) = LOWER(%s)
+                )
+            )
             ORDER BY id DESC
-        """, (username,))
+        """, (username, username))
 
         rows = cur.fetchall()
 
@@ -946,7 +960,8 @@ def get_active_shipments():
                 "agent": r[2],
                 "port": r[3],
                 "berth": r[4],
-                "status": r[5]
+                "status": r[5],
+                "assigned_tally_clerks": r[6] or ""
             })
 
         return jsonify(result)
@@ -1056,20 +1071,24 @@ def create_shipment():
         port = data.get("port")
         berth = data.get("berth")
         operation_type = data.get("operation_type")
-
         start_date = data.get("start_date")
         start_time = data.get("start_time")
-
-        tally_clerk = data.get("tally_clerk")
-
         products = data.get("products", [])
 
-        # 🔥 OPTIONAL (AUTO SUPERVISOR FROM USER SESSION)
+        assigned_clerks = normalize_clerk_list(
+            data.get("assigned_tally_clerks")
+            or data.get("tally_clerks")
+            or data.get("tally_clerk")
+        )
+
         supervisor_name = data.get("created_by", "Supervisor")
 
         # ================= VALIDATION =================
-        if not all([agent, port, berth, operation_type, tally_clerk]):
+        if not all([agent, port, berth, operation_type]):
             return jsonify({"error": "Missing required fields"}), 400
+
+        if not assigned_clerks:
+            return jsonify({"error": "Select at least one tally clerk"}), 400
 
         if not products:
             return jsonify({"error": "No products provided"}), 400
@@ -1086,6 +1105,9 @@ def create_shipment():
                 print("DATETIME ERROR:", e)
                 start_datetime = None
 
+        assigned_clerks_text = clerks_to_text(assigned_clerks)
+        primary_clerk = assigned_clerks[0]
+
         # ================= INSERT SHIPMENT =================
         cur.execute("""
             INSERT INTO shipments (
@@ -1095,10 +1117,11 @@ def create_shipment():
                 operation_type,
                 start_datetime,
                 assigned_clerk,
+                assigned_tally_clerks,
                 supervisor_name,
                 status
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
             RETURNING id
         """, (
             agent,
@@ -1106,13 +1129,13 @@ def create_shipment():
             berth,
             operation_type,
             start_datetime,
-            tally_clerk,
+            primary_clerk,
+            assigned_clerks_text,
             supervisor_name,
             "ONGOING"
         ))
 
         shipment_id = cur.fetchone()[0]
-
         shipment_code = f"SHP-{str(shipment_id).zfill(4)}"
 
         cur.execute("""
@@ -1129,7 +1152,6 @@ def create_shipment():
             if total_tonnage is None:
                 raise Exception(f"Tonnage missing for product {product_name}")
 
-            # 🔹 PRODUCT TABLE
             total_pcs = p.get("total_pcs", 0)
 
             cur.execute("""
@@ -1140,11 +1162,10 @@ def create_shipment():
                 shipment_id,
                 product_name,
                 float(total_tonnage),
-                float(total_pcs),  # 🔥 NEW
+                float(total_pcs),
                 0
             ))
 
-            # 🔹 HATCH TABLE
             for hatch in p.get("hatches", []):
                 cur.execute("""
                     INSERT INTO shipment_hatches
@@ -1407,12 +1428,19 @@ def get_last_report(shipment_id):
 
 @app.route('/get_all_shipments', methods=['GET'])
 def get_all_shipments():
-
     conn = get_connection()
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT id, shipment_code, agent, port, berth, operation_type, status
+        SELECT
+            id,
+            shipment_code,
+            agent,
+            port,
+            berth,
+            operation_type,
+            status,
+            COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
         FROM shipments
         WHERE status != 'DELETED'
         ORDER BY id DESC
@@ -1429,7 +1457,8 @@ def get_all_shipments():
             "port": r[3],
             "berth": r[4],
             "operation_type": r[5],
-            "status": r[6]
+            "status": r[6],
+            "assigned_tally_clerks": r[7] or ""
         })
 
     cur.close()
@@ -1444,6 +1473,26 @@ def has_reports(cur, shipment_id):
     """, (shipment_id,))
     return cur.fetchone()[0] > 0
 
+def normalize_clerk_list(value):
+    if not value:
+        return []
+
+    if isinstance(value, list):
+        raw = value
+    else:
+        raw = str(value).split(",")
+
+    cleaned = []
+    for item in raw:
+        text = str(item).strip()
+        if text and text not in cleaned:
+            cleaned.append(text)
+    return cleaned
+
+
+def clerks_to_text(value):
+    return ", ".join(normalize_clerk_list(value))
+
 @app.route('/get_shipment_edit_details/<int:shipment_id>', methods=['GET'])
 def get_shipment_edit_details(shipment_id):
     conn = get_connection()
@@ -1451,7 +1500,16 @@ def get_shipment_edit_details(shipment_id):
 
     try:
         cur.execute("""
-            SELECT id, shipment_code, agent, port, berth, operation_type, assigned_clerk, status
+            SELECT
+                id,
+                shipment_code,
+                agent,
+                port,
+                berth,
+                operation_type,
+                assigned_tally_clerks,
+                assigned_clerk,
+                status
             FROM shipments
             WHERE id = %s
         """, (shipment_id,))
@@ -1464,6 +1522,8 @@ def get_shipment_edit_details(shipment_id):
                 "message": "Shipment not found"
             }), 404
 
+        assigned_text = row[6] or row[7] or ""
+
         return jsonify({
             "id": row[0],
             "shipment_code": row[1] or "",
@@ -1471,8 +1531,8 @@ def get_shipment_edit_details(shipment_id):
             "port": row[3] or "",
             "berth": row[4] or "",
             "operation_type": row[5] or "",
-            "assigned_clerk": row[6] or "",
-            "status": row[7] or "",
+            "assigned_tally_clerks": assigned_text,
+            "status": row[8] or "",
             "has_reports": has_reports(cur, shipment_id)
         })
 
@@ -1510,6 +1570,21 @@ def update_shipment():
                 "message": "Shipment not found"
             }), 404
 
+        assigned_clerks = normalize_clerk_list(
+            data.get("assigned_tally_clerks")
+            or data.get("tally_clerks")
+            or data.get("assigned_clerk")
+        )
+
+        if not assigned_clerks:
+            return jsonify({
+                "status": "error",
+                "message": "Select at least one tally clerk"
+            }), 400
+
+        assigned_text = clerks_to_text(assigned_clerks)
+        primary_clerk = assigned_clerks[0]
+
         report_exists = has_reports(cur, shipment_id)
 
         if not report_exists:
@@ -1519,24 +1594,28 @@ def update_shipment():
                     port=%s,
                     berth=%s,
                     operation_type=%s,
-                    assigned_clerk=%s
+                    assigned_clerk=%s,
+                    assigned_tally_clerks=%s
                 WHERE id=%s
             """, (
                 data.get("agent"),
                 data.get("port"),
                 data.get("berth"),
                 data.get("operation_type"),
-                data.get("assigned_clerk"),
+                primary_clerk,
+                assigned_text,
                 shipment_id
             ))
             edit_mode = "full"
         else:
             cur.execute("""
                 UPDATE shipments
-                SET assigned_clerk=%s
+                SET assigned_clerk=%s,
+                    assigned_tally_clerks=%s
                 WHERE id=%s
             """, (
-                data.get("assigned_clerk"),
+                primary_clerk,
+                assigned_text,
                 shipment_id
             ))
             edit_mode = "limited"
