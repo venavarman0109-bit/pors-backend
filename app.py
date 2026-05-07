@@ -1838,6 +1838,90 @@ def get_report_details(report_db_id):
         cur.close()
         conn.close()
 
+@app.route('/get_shipments_by_agent', methods=['POST'])
+def get_shipments_by_agent():
+    data = request.json
+    agent = data.get("agent")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT id, shipment_code, port, berth, status
+            FROM shipments
+            WHERE LOWER(agent) = LOWER(%s)
+              AND status != 'DELETED'
+            ORDER BY id DESC
+        """, (agent,))
+
+        rows = cur.fetchall()
+
+        result = []
+        for r in rows:
+            result.append({
+                "id": r[0],
+                "shipment_code": r[1],
+                "port": r[2],
+                "berth": r[3],
+                "status": r[4]
+            })
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
+
+
+@app.route('/get_reports_by_shipment/<int:shipment_id>', methods=['GET'])
+def get_reports_by_shipment(shipment_id):
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        cur.execute("""
+            SELECT
+                id,
+                report_no,
+                report_id,
+                date,
+                start_time,
+                end_time,
+                vessel_name,
+                created_by
+            FROM shipment_reports
+            WHERE shipment_id = %s
+            ORDER BY id DESC
+        """, (shipment_id,))
+
+        rows = cur.fetchall()
+
+        result = []
+        for r in rows:
+            result.append({
+                "id": r[0],
+                "report_no": r[1],
+                "report_id": r[2],
+                "date": str(r[3]),
+                "start_time": str(r[4]),
+                "end_time": str(r[5]),
+                "vessel_name": r[6] or "",
+                "created_by": r[7] or ""
+            })
+
+        return jsonify(result)
+
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
