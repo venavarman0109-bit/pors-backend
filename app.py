@@ -2067,6 +2067,162 @@ def get_reports_by_shipment(shipment_id):
         cur.close()
         conn.close()
 
+@app.route('/get_shipment_progress_dashboard', methods=['POST'])
+def get_shipment_progress_dashboard():
+
+    data = request.json
+
+    username = data.get("username", "")
+    role = data.get("role", "")
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+
+        # =========================================
+        # ROLE FILTER
+        # =========================================
+
+        admin_roles = [
+            "System Admin",
+            "Admin Staff",
+            "Director",
+            "Manager",
+            "Supervisor"
+        ]
+
+        if role in admin_roles:
+
+            cur.execute("""
+                SELECT
+                    s.id,
+                    s.shipment_code,
+                    s.agent,
+                    s.port,
+                    s.berth,
+                    s.operation_type,
+                    s.status,
+                    COALESCE(
+                        NULLIF(s.assigned_tally_clerks, ''),
+                        s.assigned_clerk,
+                        ''
+                    ) AS assigned_tally_clerks
+
+                FROM shipments s
+
+                WHERE s.status != 'DELETED'
+
+                ORDER BY s.id DESC
+            """)
+
+        else:
+
+            # AGENT ONLY THEIR SHIPMENTS
+            cur.execute("""
+                SELECT
+                    s.id,
+                    s.shipment_code,
+                    s.agent,
+                    s.port,
+                    s.berth,
+                    s.operation_type,
+                    s.status,
+                    COALESCE(
+                        NULLIF(s.assigned_tally_clerks, ''),
+                        s.assigned_clerk,
+                        ''
+                    ) AS assigned_tally_clerks
+
+                FROM shipments s
+
+                WHERE LOWER(s.agent)=LOWER(%s)
+                AND s.status != 'DELETED'
+
+                ORDER BY s.id DESC
+            """, (username,))
+
+        shipment_rows = cur.fetchall()
+
+        result = []
+
+        # =========================================
+        # BUILD SHIPMENT CARDS
+        # =========================================
+
+        for row in shipment_rows:
+
+            shipment_id = row[0]
+
+            # TOTALS
+            cur.execute("""
+                SELECT
+                    COALESCE(SUM(total_tonnage), 0),
+                    COALESCE(SUM(loaded), 0)
+                FROM shipment_products
+                WHERE shipment_id=%s
+            """, (shipment_id,))
+
+            totals = cur.fetchone()
+
+            total_tons = float(totals[0] or 0)
+            loaded_tons = float(totals[1] or 0)
+
+            remaining_tons = max(total_tons - loaded_tons, 0)
+
+            percentage = 0
+
+            if total_tons > 0:
+                percentage = round((loaded_tons / total_tons) * 100, 1)
+
+            # LATEST REPORT
+            cur.execute("""
+                SELECT report_id
+                FROM shipment_reports
+                WHERE shipment_id=%s
+                ORDER BY id DESC
+                LIMIT 1
+            """, (shipment_id,))
+
+            latest_report = cur.fetchone()
+
+            latest_report_id = "-"
+
+            if latest_report:
+                latest_report_id = latest_report[0]
+
+            result.append({
+                "shipment_id": shipment_id,
+                "shipment_code": row[1],
+                "agent": row[2],
+                "port": row[3],
+                "berth": row[4],
+                "operation_type": row[5],
+                "status": row[6],
+                "assigned_tally_clerks": row[7] or "",
+
+                "total_tons": total_tons,
+                "loaded_tons": loaded_tons,
+                "remaining_tons": remaining_tons,
+
+                "percentage": percentage,
+
+                "latest_report_id": latest_report_id
+            })
+
+        return jsonify(result)
+
+    except Exception as e:
+
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        })
+
+    finally:
+        cur.close()
+        conn.close()
+
 # 🔓 LOGOUT
 @app.route('/logout', methods=['POST'])
 def logout():
