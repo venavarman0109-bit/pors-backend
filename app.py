@@ -76,7 +76,8 @@ def login():
         cur = conn.cursor()
 
         cur.execute("""
-            SELECT role FROM users_v2 
+            SELECT staff_id, role
+            FROM users_v2
             WHERE LOWER(username)=LOWER(%s) AND password=%s
         """, (username, password))
 
@@ -86,7 +87,8 @@ def login():
         if result:
             return jsonify({
                 "status": "success",
-                "role": result[0]
+                "staff_id": result[0],
+                "role": result[1]
             })
 
         return jsonify({"status": "fail"})
