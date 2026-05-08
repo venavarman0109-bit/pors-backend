@@ -961,33 +961,108 @@ def submit_outturn():
 
 @app.route('/get_shipment_progress/<int:shipment_id>', methods=['GET'])
 def get_shipment_progress(shipment_id):
+    requester_username = (request.args.get("requester_username") or "").strip()
+
+    if not requester_username:
+        return jsonify({"error": "Requester missing"}), 400
 
     conn = get_connection()
     cur = conn.cursor()
 
     try:
+        # =========================
+        # GET REQUESTER ROLE
+        # =========================
+        cur.execute("""
+            SELECT role
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (requester_username,))
+        user_row = cur.fetchone()
 
-        # ================= PRODUCT TOTALS =================
+        if not user_row:
+            return jsonify({"error": "User not found"}), 404
 
+        role = user_row[0] or ""
+
+        # =========================
+        # GET SHIPMENT ACCESS INFO
+        # =========================
+        cur.execute("""
+            SELECT
+                agent,
+                assigned_clerk,
+                assigned_tally_clerks
+            FROM shipments
+            WHERE id = %s
+        """, (shipment_id,))
+
+        ship_row = cur.fetchone()
+
+        if not ship_row:
+            return jsonify({"error": "Shipment not found"}), 404
+
+        shipment_agent = ship_row[0] or ""
+        assigned_clerk = ship_row[1] or ""
+        assigned_tally_clerks = ship_row[2] or ""
+
+        admin_roles = [
+            "System Admin",
+            "Admin Staff",
+            "Director",
+            "Manager",
+            "Supervisor"
+        ]
+
+        role_lower = role.lower()
+        requester_lower = requester_username.lower()
+
+        # =========================
+        # PERMISSION CHECK
+        # =========================
+        allowed = False
+
+        if role in admin_roles:
+            allowed = True
+
+        elif "agent" in role_lower:
+            allowed = shipment_agent.lower() == requester_lower
+
+        elif "tally" in role_lower or "clerk" in role_lower:
+            clerk_list = [
+                c.strip().lower()
+                for c in assigned_tally_clerks.split(",")
+                if c.strip()
+            ]
+
+            allowed = (
+                assigned_clerk.lower() == requester_lower
+                or requester_lower in clerk_list
+            )
+
+        else:
+            allowed = shipment_agent.lower() == requester_lower
+
+        if not allowed:
+            return jsonify({"error": "Forbidden"}), 403
+
+        # =========================
+        # PRODUCT TOTALS
+        # =========================
         cur.execute("""
             SELECT
                 sp.product,
                 sp.total_tonnage,
                 sp.total_pcs,
                 sp.loaded,
-
                 COALESCE(SUM(sri.pcs), 0)
             FROM shipment_products sp
-
             LEFT JOIN shipment_reports sr
                 ON sr.shipment_id = sp.shipment_id
-
             LEFT JOIN shipment_report_items sri
                 ON sri.report_id = sr.id
                 AND sri.product = sp.product
-
             WHERE sp.shipment_id = %s
-
             GROUP BY
                 sp.product,
                 sp.total_tonnage,
@@ -1003,17 +1078,17 @@ def get_shipment_progress(shipment_id):
             progress[product] = {
                 "total_tonnage": float(total_tonnage),
                 "total_pcs": float(total_pcs),
-
                 "loaded_tons": float(loaded_tons),
                 "loaded_pcs": float(loaded_pcs),
-
                 "balance_tons": float(total_tonnage) - float(loaded_tons),
                 "balance_pcs": float(total_pcs) - float(loaded_pcs)
             }
-        # ================= LAST REPORT =================
+
+        # =========================
+        # LAST REPORT
+        # =========================
         cur.execute("""
-            SELECT
-                vessel_name
+            SELECT vessel_name
             FROM shipment_reports
             WHERE shipment_id = %s
             ORDER BY id DESC
@@ -1021,23 +1096,23 @@ def get_shipment_progress(shipment_id):
         """, (shipment_id,))
 
         last_report = cur.fetchone()
-
         vessel_name = ""
 
         if last_report:
             vessel_name = last_report[0] or ""
 
-        # ================= FINAL RESPONSE =================
+        # =========================
+        # FINAL RESPONSE
+        # =========================
         return jsonify({
             "progress": progress,
             "vessel_name": vessel_name
         })
 
     except Exception as e:
-
         return jsonify({
             "error": str(e)
-        })
+        }), 500
 
     finally:
         cur.close()
@@ -1791,20 +1866,28 @@ def delete_shipment():
 
 @app.route('/get_outturn_reports', methods=['POST'])
 def get_outturn_reports():
-
-    data = request.json
-
-    username = data.get("username")
-    role = data.get("role")
+    data = request.json or {}
+    username = (data.get("username") or "").strip()
 
     conn = get_connection()
     cur = conn.cursor()
 
     try:
+        # Get the real role from DB instead of trusting the client
+        cur.execute("""
+            SELECT role
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (username,))
+        row = cur.fetchone()
 
-        # =========================================
-        # 🔥 ADMIN → VIEW ALL REPORTS
-        # =========================================
+        if not row:
+            return jsonify({
+                "status": "error",
+                "message": "User not found"
+            }), 404
+
+        role = row[0] or ""
 
         admin_roles = [
             "System Admin",
@@ -1815,7 +1898,6 @@ def get_outturn_reports():
         ]
 
         if role in admin_roles:
-
             cur.execute("""
                 SELECT
                     sr.id,
@@ -1828,21 +1910,13 @@ def get_outturn_reports():
                     sr.end_time,
                     sr.created_by,
                     s.status
-
                 FROM shipment_reports sr
-
                 JOIN shipments s
                     ON sr.shipment_id = s.id
-
                 ORDER BY sr.id DESC
             """)
 
-        # =========================================
-        # 🔥 TALLY CLERK → ONLY OWN REPORTS
-        # =========================================
-
         elif "tally" in role.lower() or "clerk" in role.lower():
-
             cur.execute("""
                 SELECT
                     sr.id,
@@ -1855,23 +1929,14 @@ def get_outturn_reports():
                     sr.end_time,
                     sr.created_by,
                     s.status
-
                 FROM shipment_reports sr
-
                 JOIN shipments s
                     ON sr.shipment_id = s.id
-
                 WHERE LOWER(sr.created_by) = LOWER(%s)
-
                 ORDER BY sr.id DESC
             """, (username,))
 
-        # =========================================
-        # 🔥 AGENT → ONLY THEIR AGENT REPORTS
-        # =========================================
-
         else:
-
             cur.execute("""
                 SELECT
                     sr.id,
@@ -1884,23 +1949,17 @@ def get_outturn_reports():
                     sr.end_time,
                     sr.created_by,
                     s.status
-
                 FROM shipment_reports sr
-
                 JOIN shipments s
                     ON sr.shipment_id = s.id
-
                 WHERE LOWER(s.agent) = LOWER(%s)
-
                 ORDER BY sr.id DESC
             """, (username,))
 
         rows = cur.fetchall()
 
         result = []
-
         for r in rows:
-
             result.append({
                 "id": r[0],
                 "report_id": r[1],
@@ -1917,11 +1976,10 @@ def get_outturn_reports():
         return jsonify(result)
 
     except Exception as e:
-
         return jsonify({
             "status": "error",
             "message": str(e)
-        })
+        }), 500
 
     finally:
         cur.close()
@@ -1929,6 +1987,10 @@ def get_outturn_reports():
 
 @app.route('/get_report_details/<int:report_db_id>', methods=['GET'])
 def get_report_details(report_db_id):
+    requester_username = (request.args.get("requester_username") or "").strip()
+
+    if not requester_username:
+        return jsonify({"status": "error", "message": "Requester missing"}), 400
 
     import json
 
@@ -1936,10 +1998,17 @@ def get_report_details(report_db_id):
     cur = conn.cursor()
 
     try:
+        cur.execute("""
+            SELECT role
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (requester_username,))
+        user_row = cur.fetchone()
 
-        # =========================================
-        # REPORT + SHIPMENT INFO
-        # =========================================
+        if not user_row:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+        role = user_row[0] or ""
 
         cur.execute("""
             SELECT
@@ -1954,26 +2023,22 @@ def get_report_details(report_db_id):
                 sr.remarks,
                 sr.vessel_name,
                 sr.created_by,
-
                 s.shipment_code,
                 s.agent,
                 s.port,
                 s.berth,
                 s.operation_type,
                 s.status
-
             FROM shipment_reports sr
-
             JOIN shipments s
                 ON sr.shipment_id = s.id
-
             WHERE sr.id = %s
         """, (report_db_id,))
 
         report = cur.fetchone()
 
         if not report:
-            return jsonify({"error": "Report not found"})
+            return jsonify({"error": "Report not found"}), 404
 
         (
             db_id,
@@ -1995,9 +2060,28 @@ def get_report_details(report_db_id):
             status
         ) = report
 
-        # =========================================
-        # OPERATIONS
-        # =========================================
+        admin_roles = [
+            "System Admin",
+            "Admin Staff",
+            "Director",
+            "Manager",
+            "Supervisor"
+        ]
+
+        allowed = False
+
+        if role in admin_roles:
+            allowed = True
+        elif "tally" in role.lower() or "clerk" in role.lower():
+            allowed = (created_by or "").lower() == requester_username.lower()
+        else:
+            allowed = (agent or "").lower() == requester_username.lower()
+
+        if not allowed:
+            return jsonify({
+                "status": "forbidden",
+                "message": "You are not allowed to view this report"
+            }), 403
 
         cur.execute("""
             SELECT
@@ -2008,18 +2092,14 @@ def get_report_details(report_db_id):
                 trips,
                 gangs,
                 mode
-
             FROM shipment_report_items
-
             WHERE report_id = %s
         """, (db_id,))
 
         operation_rows = cur.fetchall()
 
         operations = []
-
         for row in operation_rows:
-
             operations.append({
                 "product": row[0],
                 "hatch": row[1],
@@ -2032,30 +2112,22 @@ def get_report_details(report_db_id):
                 "tons_balance": 0
             })
 
-        # =========================================
-        # PRODUCTS
-        # =========================================
-
         cur.execute("""
             SELECT
                 product,
                 total_tonnage,
                 total_pcs,
                 loaded
-
             FROM shipment_products
-
             WHERE shipment_id = %s
         """, (shipment_id,))
 
         product_rows = cur.fetchall()
 
         products = []
-
         loaded_total = 0
 
         for p in product_rows:
-
             loaded_total += float(p[3])
 
             products.append({
@@ -2080,28 +2152,22 @@ def get_report_details(report_db_id):
         return jsonify({
             "shipment_id": shipment_id,
             "shipment_code": shipment_code,
-
             "form_no": report_no,
             "form_code": report_code,
-
             "start_time": start_time,
             "end_time": end_time,
-
             "operations": operations,
             "shipment_data": shipment_data,
-
             "delays": json.loads(delays) if delays else [],
             "remarks": json.loads(remarks) if remarks else [],
-
             "current_user": created_by
         })
 
     except Exception as e:
-
         return jsonify({
             "status": "error",
             "message": str(e)
-        })
+        }), 500
 
     finally:
         cur.close()
@@ -2109,20 +2175,50 @@ def get_report_details(report_db_id):
 
 @app.route('/get_shipments_by_agent', methods=['POST'])
 def get_shipments_by_agent():
-    data = request.json
-    agent = data.get("agent")
+    data = request.json or {}
+
+    requester_username = (data.get("requester_username") or data.get("username") or "").strip()
+    target_agent = (data.get("agent") or requester_username).strip()
 
     conn = get_connection()
     cur = conn.cursor()
 
     try:
         cur.execute("""
+            SELECT role
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (requester_username,))
+        row = cur.fetchone()
+
+        if not row:
+            return jsonify({
+                "status": "error",
+                "message": "User not found"
+            }), 404
+
+        role = row[0] or ""
+
+        admin_roles = [
+            "System Admin",
+            "Admin Staff",
+            "Director",
+            "Manager",
+            "Supervisor"
+        ]
+
+        if role in admin_roles:
+            allowed_agent = target_agent
+        else:
+            allowed_agent = requester_username
+
+        cur.execute("""
             SELECT id, shipment_code, port, berth, status
             FROM shipments
             WHERE LOWER(agent) = LOWER(%s)
               AND status != 'DELETED'
             ORDER BY id DESC
-        """, (agent,))
+        """, (allowed_agent,))
 
         rows = cur.fetchall()
 
@@ -2139,33 +2235,98 @@ def get_shipments_by_agent():
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
     finally:
         cur.close()
         conn.close()
 
 
+
 @app.route('/get_reports_by_shipment/<int:shipment_id>', methods=['GET'])
 def get_reports_by_shipment(shipment_id):
+    requester_username = (request.args.get("requester_username") or "").strip()
+
+    if not requester_username:
+        return jsonify({"status": "error", "message": "Requester missing"}), 400
+
     conn = get_connection()
     cur = conn.cursor()
 
     try:
         cur.execute("""
-            SELECT
-                id,
-                report_no,
-                report_id,
-                date,
-                start_time,
-                end_time,
-                vessel_name,
-                created_by
-            FROM shipment_reports
-            WHERE shipment_id = %s
-            ORDER BY id DESC
-        """, (shipment_id,))
+            SELECT role
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (requester_username,))
+        row = cur.fetchone()
+
+        if not row:
+            return jsonify({"status": "error", "message": "User not found"}), 404
+
+        role = row[0] or ""
+
+        admin_roles = [
+            "System Admin",
+            "Admin Staff",
+            "Director",
+            "Manager",
+            "Supervisor"
+        ]
+
+        if role in admin_roles:
+            cur.execute("""
+                SELECT
+                    id,
+                    report_no,
+                    report_id,
+                    date,
+                    start_time,
+                    end_time,
+                    vessel_name,
+                    created_by
+                FROM shipment_reports
+                WHERE shipment_id = %s
+                ORDER BY id DESC
+            """, (shipment_id,))
+
+        elif "tally" in role.lower() or "clerk" in role.lower():
+            cur.execute("""
+                SELECT
+                    id,
+                    report_no,
+                    report_id,
+                    date,
+                    start_time,
+                    end_time,
+                    vessel_name,
+                    created_by
+                FROM shipment_reports
+                WHERE shipment_id = %s
+                  AND LOWER(created_by) = LOWER(%s)
+                ORDER BY id DESC
+            """, (shipment_id, requester_username))
+
+        else:
+            cur.execute("""
+                SELECT
+                    sr.id,
+                    sr.report_no,
+                    sr.report_id,
+                    sr.date,
+                    sr.start_time,
+                    sr.end_time,
+                    sr.vessel_name,
+                    sr.created_by
+                FROM shipment_reports sr
+                JOIN shipments s ON sr.shipment_id = s.id
+                WHERE sr.shipment_id = %s
+                  AND LOWER(s.agent) = LOWER(%s)
+                ORDER BY sr.id DESC
+            """, (shipment_id, requester_username))
 
         rows = cur.fetchall()
 
@@ -2185,7 +2346,7 @@ def get_reports_by_shipment(shipment_id):
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        return jsonify({"status": "error", "message": str(e)}), 500
 
     finally:
         cur.close()
@@ -2193,20 +2354,28 @@ def get_reports_by_shipment(shipment_id):
 
 @app.route('/get_shipment_progress_dashboard', methods=['POST'])
 def get_shipment_progress_dashboard():
-
-    data = request.json
-
-    username = data.get("username", "")
-    role = data.get("role", "")
+    data = request.json or {}
+    username = (data.get("username") or "").strip()
 
     conn = get_connection()
     cur = conn.cursor()
 
     try:
+        # Get the real role from DB, do NOT trust client role
+        cur.execute("""
+            SELECT role
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (username,))
+        row = cur.fetchone()
 
-        # =========================================
-        # ROLE FILTER
-        # =========================================
+        if not row:
+            return jsonify({
+                "status": "error",
+                "message": "User not found"
+            }), 404
+
+        role = row[0] or ""
 
         admin_roles = [
             "System Admin",
@@ -2217,7 +2386,6 @@ def get_shipment_progress_dashboard():
         ]
 
         if role in admin_roles:
-
             cur.execute("""
                 SELECT
                     s.id,
@@ -2232,17 +2400,11 @@ def get_shipment_progress_dashboard():
                         s.assigned_clerk,
                         ''
                     ) AS assigned_tally_clerks
-
                 FROM shipments s
-
                 WHERE s.status != 'DELETED'
-
                 ORDER BY s.id DESC
             """)
-
         else:
-
-            # AGENT ONLY THEIR SHIPMENTS
             cur.execute("""
                 SELECT
                     s.id,
@@ -2257,63 +2419,45 @@ def get_shipment_progress_dashboard():
                         s.assigned_clerk,
                         ''
                     ) AS assigned_tally_clerks
-
                 FROM shipments s
-
-                WHERE LOWER(s.agent)=LOWER(%s)
-                AND s.status != 'DELETED'
-
+                WHERE LOWER(s.agent) = LOWER(%s)
+                  AND s.status != 'DELETED'
                 ORDER BY s.id DESC
             """, (username,))
 
         shipment_rows = cur.fetchall()
-
         result = []
 
-        # =========================================
-        # BUILD SHIPMENT CARDS
-        # =========================================
-
         for row in shipment_rows:
-
             shipment_id = row[0]
 
-            # TOTALS
             cur.execute("""
                 SELECT
                     COALESCE(SUM(total_tonnage), 0),
                     COALESCE(SUM(loaded), 0)
                 FROM shipment_products
-                WHERE shipment_id=%s
+                WHERE shipment_id = %s
             """, (shipment_id,))
-
             totals = cur.fetchone()
 
             total_tons = float(totals[0] or 0)
             loaded_tons = float(totals[1] or 0)
-
             remaining_tons = max(total_tons - loaded_tons, 0)
 
             percentage = 0
-
             if total_tons > 0:
                 percentage = round((loaded_tons / total_tons) * 100, 1)
 
-            # LATEST REPORT
             cur.execute("""
                 SELECT report_id
                 FROM shipment_reports
-                WHERE shipment_id=%s
+                WHERE shipment_id = %s
                 ORDER BY id DESC
                 LIMIT 1
             """, (shipment_id,))
-
             latest_report = cur.fetchone()
 
-            latest_report_id = "-"
-
-            if latest_report:
-                latest_report_id = latest_report[0]
+            latest_report_id = latest_report[0] if latest_report else "-"
 
             result.append({
                 "shipment_id": shipment_id,
@@ -2324,24 +2468,20 @@ def get_shipment_progress_dashboard():
                 "operation_type": row[5],
                 "status": row[6],
                 "assigned_tally_clerks": row[7] or "",
-
                 "total_tons": total_tons,
                 "loaded_tons": loaded_tons,
                 "remaining_tons": remaining_tons,
-
                 "percentage": percentage,
-
                 "latest_report_id": latest_report_id
             })
 
         return jsonify(result)
 
     except Exception as e:
-
         return jsonify({
             "status": "error",
             "message": str(e)
-        })
+        }), 500
 
     finally:
         cur.close()
