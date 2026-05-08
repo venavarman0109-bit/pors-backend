@@ -3,8 +3,15 @@ import random
 import os
 import psycopg2
 from datetime import datetime
+from flask import send_from_directory
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
+
+SIGNATURE_FOLDER = "signatures"
+
+if not os.path.exists(SIGNATURE_FOLDER):
+    os.makedirs(SIGNATURE_FOLDER)
 
 # 🔥 DB CONNECTION
 def get_connection():
@@ -302,7 +309,7 @@ def get_my_account():
     cur = conn.cursor()
 
     cur.execute("""
-        SELECT email, contact
+        SELECT email, contact, signature_path
         FROM users_v2
         WHERE username=%s
     """, (data['username'],))
@@ -315,10 +322,125 @@ def get_my_account():
     if user:
         return jsonify({
             "email": user[0],
-            "contact": user[1]
+            "contact": user[1],
+            "signature_path": user[2]
         })
 
     return jsonify({"error": "User not found"}), 404
+
+@app.route('/upload_signature', methods=['POST'])
+def upload_signature():
+    username = request.form.get('username')
+
+    if not username:
+        return jsonify({"status": "error", "message": "Username missing"})
+
+    if 'signature' not in request.files:
+        return jsonify({"status": "error", "message": "No file uploaded"})
+
+    file = request.files['signature']
+
+    if file.filename == '':
+        return jsonify({"status": "error", "message": "No selected file"})
+
+    filename = secure_filename(file.filename)
+    extension = filename.split('.')[-1].lower()
+
+    if extension not in ['png', 'jpg', 'jpeg']:
+        return jsonify({"status": "error", "message": "Invalid file type"})
+
+    safe_username = secure_filename(username)
+    new_filename = f"{safe_username}_signature.{extension}"
+    save_path = os.path.join(SIGNATURE_FOLDER, new_filename)
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        # delete old signature file if one already exists
+        cur.execute("""
+            SELECT signature_path
+            FROM users_v2
+            WHERE username=%s
+        """, (username,))
+        old_row = cur.fetchone()
+
+        if old_row and old_row[0]:
+            old_path = os.path.join(SIGNATURE_FOLDER, old_row[0])
+            if os.path.exists(old_path):
+                os.remove(old_path)
+
+        # save new file
+        file.save(save_path)
+
+        # update DB
+        cur.execute("""
+            UPDATE users_v2
+            SET signature_path=%s
+            WHERE username=%s
+        """, (new_filename, username))
+
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "filename": new_filename
+        })
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({"status": "error", "message": str(e)})
+
+    finally:
+        cur.close()
+        conn.close()
+
+@app.route('/get_signature/<filename>')
+def get_signature(filename):
+    file_path = os.path.join(SIGNATURE_FOLDER, filename)
+
+    if not os.path.exists(file_path):
+        return jsonify({"status": "error", "message": "Signature not found"}), 404
+
+    return send_from_directory(SIGNATURE_FOLDER, filename)
+
+
+@app.route('/remove_signature', methods=['POST'])
+def remove_signature():
+    data = request.json
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    cur.execute("""
+        SELECT signature_path
+        FROM users_v2
+        WHERE username=%s
+    """, (data['username'],))
+
+    result = cur.fetchone()
+
+    if not result:
+        return jsonify({"status": "error"})
+
+    signature = result[0]
+
+    if signature:
+        file_path = os.path.join(SIGNATURE_FOLDER, signature)
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+    cur.execute("""
+        UPDATE users_v2
+        SET signature_path=NULL
+        WHERE username=%s
+    """, (data['username'],))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+
+    return jsonify({"status": "removed"})
 
 @app.route('/change_password', methods=['POST'])
 def change_password():
