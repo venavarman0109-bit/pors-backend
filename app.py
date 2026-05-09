@@ -107,34 +107,51 @@ def login():
 # ➕ ADD USER
 @app.route('/add_user', methods=['POST'])
 def add_user():
-    data = request.json
+    data = request.json or {}
 
-    # 🔥 Validation
     required_fields = ["username", "password", "role"]
     for field in required_fields:
         if not data.get(field):
-            return jsonify({"status": "error", "message": f"{field} missing"})
+            return jsonify({"status": "error", "message": f"{field} missing"}), 400
 
-    conn = get_connection()
-    cur = conn.cursor()
+    conn = None
+    cur = None
 
     try:
-        staff_id = generate_staff_id(data['role'])
+        conn = get_connection()
+        cur = conn.cursor()
 
-        cur.execute(
-            """
+        username = data["username"].strip()
+        password = data["password"].strip()
+        role = data["role"].strip()
+        email = (data.get("email") or "").strip()
+        contact = (data.get("contact") or "").strip()
+
+        # prevent duplicate usernames
+        cur.execute("""
+            SELECT 1
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (username,))
+        if cur.fetchone():
+            return jsonify({
+                "status": "error",
+                "message": "Username already exists"
+            }), 400
+
+        staff_id = generate_staff_id(role)
+
+        cur.execute("""
             INSERT INTO users_v2 (staff_id, username, password, role, email, contact)
             VALUES (%s, %s, %s, %s, %s, %s)
-            """,
-            (
-                staff_id,
-                data['username'],
-                data['password'],
-                data['role'],
-                data.get('email', ''),
-                data.get('contact', '')
-            )
-        )
+        """, (
+            staff_id,
+            username,
+            password,
+            role,
+            email,
+            contact
+        ))
 
         conn.commit()
 
@@ -144,11 +161,19 @@ def add_user():
         })
 
     except Exception as e:
-        return jsonify({"status": "error", "message": str(e)})
+        if conn:
+            conn.rollback()
+        print("ADD USER ERROR:", str(e))
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
 
     finally:
-        cur.close()
-        conn.close()
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
 
 
 # 👥 VIEW USERS (ACTIVITY)
