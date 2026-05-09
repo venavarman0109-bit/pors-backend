@@ -2085,6 +2085,17 @@ def get_report_details(report_db_id):
             status
         ) = report
 
+        # GET CREATOR SIGNATURE
+        cur.execute("""
+            SELECT signature_path
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (created_by,))
+
+        sig_row = cur.fetchone()
+
+        signature_path = sig_row[0] if sig_row else None
+
         admin_roles = [
             "System Admin",
             "Admin Staff",
@@ -2185,7 +2196,8 @@ def get_report_details(report_db_id):
             "shipment_data": shipment_data,
             "delays": json.loads(delays) if delays else [],
             "remarks": json.loads(remarks) if remarks else [],
-            "current_user": created_by
+            "current_user": created_by,
+            "signature_path": signature_path
         })
 
     except Exception as e:
