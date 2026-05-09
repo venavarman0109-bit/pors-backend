@@ -2218,10 +2218,7 @@ def get_shipments_by_agent():
     selected_agent = (data.get("agent") or "").strip()
 
     if not requester_username:
-        return jsonify({
-            "status": "error",
-            "message": "Requester missing"
-        }), 400
+        return jsonify({"status": "error", "message": "Requester missing"}), 400
 
     conn = get_connection()
     cur = conn.cursor()
@@ -2235,12 +2232,10 @@ def get_shipments_by_agent():
         row = cur.fetchone()
 
         if not row:
-            return jsonify({
-                "status": "error",
-                "message": "User not found"
-            }), 404
+            return jsonify({"status": "error", "message": "User not found"}), 404
 
         role = row[0] or ""
+        role_lower = role.lower()
 
         admin_roles = [
             "System Admin",
@@ -2250,53 +2245,31 @@ def get_shipments_by_agent():
             "Supervisor"
         ]
 
+        # Admin can choose any agent
         if role in admin_roles:
-            # Admin can choose any agent
-            cur.execute("""
-                SELECT
-                    id,
-                    shipment_code,
-                    port,
-                    berth,
-                    status,
-                    COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
-                FROM shipments
-                WHERE LOWER(TRIM(agent)) = LOWER(TRIM(%s))
-                  AND status != 'DELETED'
-                ORDER BY id DESC
-            """, (selected_agent,))
+            agent_to_use = selected_agent
 
+        # Agent can only see their own shipments
+        elif "agent" in role_lower:
+            agent_to_use = requester_username
+
+        # Tally clerk / others see only shipments assigned to them
         else:
-            # Non-admin users can only see shipments assigned to them
-            # but still filtered by selected agent if one is chosen
-            query = """
-                SELECT
-                    id,
-                    shipment_code,
-                    port,
-                    berth,
-                    status,
-                    COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
-                FROM shipments
-                WHERE status != 'DELETED'
-                  AND (
-                        LOWER(COALESCE(assigned_clerk, '')) = LOWER(%s)
-                        OR EXISTS (
-                            SELECT 1
-                            FROM unnest(string_to_array(COALESCE(assigned_tally_clerks, ''), ',')) AS clerk
-                            WHERE LOWER(TRIM(clerk)) = LOWER(%s)
-                        )
-                  )
-            """
-            params = [requester_username, requester_username]
+            agent_to_use = selected_agent or requester_username
 
-            if selected_agent:
-                query += " AND LOWER(TRIM(agent)) = LOWER(TRIM(%s))"
-                params.append(selected_agent)
-
-            query += " ORDER BY id DESC"
-
-            cur.execute(query, tuple(params))
+        cur.execute("""
+            SELECT
+                id,
+                shipment_code,
+                port,
+                berth,
+                status,
+                COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
+            FROM shipments
+            WHERE LOWER(TRIM(agent)) = LOWER(TRIM(%s))
+              AND status != 'DELETED'
+            ORDER BY id DESC
+        """, (agent_to_use,))
 
         rows = cur.fetchall()
 
@@ -2314,15 +2287,11 @@ def get_shipments_by_agent():
         return jsonify(result)
 
     except Exception as e:
-        return jsonify({
-            "status": "error",
-            "message": str(e)
-        }), 500
+        return jsonify({"status": "error", "message": str(e)}), 500
 
     finally:
         cur.close()
         conn.close()
-
 
 @app.route('/get_reports_by_shipment/<int:shipment_id>', methods=['GET'])
 def get_reports_by_shipment(shipment_id):
