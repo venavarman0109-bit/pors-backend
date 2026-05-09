@@ -2203,7 +2203,13 @@ def get_shipments_by_agent():
     data = request.json or {}
 
     requester_username = (data.get("requester_username") or data.get("username") or "").strip()
-    target_agent = (data.get("agent") or requester_username).strip()
+    selected_agent = (data.get("agent") or "").strip()
+
+    if not requester_username:
+        return jsonify({
+            "status": "error",
+            "message": "Requester missing"
+        }), 400
 
     conn = get_connection()
     cur = conn.cursor()
@@ -2233,17 +2239,52 @@ def get_shipments_by_agent():
         ]
 
         if role in admin_roles:
-            allowed_agent = target_agent
-        else:
-            allowed_agent = requester_username
+            # Admin can choose any agent
+            cur.execute("""
+                SELECT
+                    id,
+                    shipment_code,
+                    port,
+                    berth,
+                    status,
+                    COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
+                FROM shipments
+                WHERE LOWER(TRIM(agent)) = LOWER(TRIM(%s))
+                  AND status != 'DELETED'
+                ORDER BY id DESC
+            """, (selected_agent,))
 
-        cur.execute("""
-            SELECT id, shipment_code, port, berth, status
-            FROM shipments
-            WHERE LOWER(TRIM(agent)) = LOWER(TRIM(%s))
-              AND status != 'DELETED'
-            ORDER BY id DESC
-        """, (allowed_agent,))
+        else:
+            # Non-admin users can only see shipments assigned to them
+            # but still filtered by selected agent if one is chosen
+            query = """
+                SELECT
+                    id,
+                    shipment_code,
+                    port,
+                    berth,
+                    status,
+                    COALESCE(NULLIF(assigned_tally_clerks, ''), assigned_clerk, '') AS assigned_tally_clerks
+                FROM shipments
+                WHERE status != 'DELETED'
+                  AND (
+                        LOWER(COALESCE(assigned_clerk, '')) = LOWER(%s)
+                        OR EXISTS (
+                            SELECT 1
+                            FROM unnest(string_to_array(COALESCE(assigned_tally_clerks, ''), ',')) AS clerk
+                            WHERE LOWER(TRIM(clerk)) = LOWER(%s)
+                        )
+                  )
+            """
+            params = [requester_username, requester_username]
+
+            if selected_agent:
+                query += " AND LOWER(TRIM(agent)) = LOWER(TRIM(%s))"
+                params.append(selected_agent)
+
+            query += " ORDER BY id DESC"
+
+            cur.execute(query, tuple(params))
 
         rows = cur.fetchall()
 
@@ -2254,7 +2295,8 @@ def get_shipments_by_agent():
                 "shipment_code": r[1],
                 "port": r[2],
                 "berth": r[3],
-                "status": r[4]
+                "status": r[4],
+                "assigned_tally_clerks": r[5] or ""
             })
 
         return jsonify(result)
@@ -2268,7 +2310,6 @@ def get_shipments_by_agent():
     finally:
         cur.close()
         conn.close()
-
 
 
 @app.route('/get_reports_by_shipment/<int:shipment_id>', methods=['GET'])
