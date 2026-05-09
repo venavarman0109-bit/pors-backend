@@ -338,7 +338,7 @@ def get_my_account():
     cur.execute("""
         SELECT email, contact, signature_path
         FROM users_v2
-        WHERE username=%s
+        WHERE LOWER(username) = LOWER(%s)
     """, (data['username'],))
 
     user = cur.fetchone()
