@@ -2240,7 +2240,7 @@ def get_shipments_by_agent():
         cur.execute("""
             SELECT id, shipment_code, port, berth, status
             FROM shipments
-            WHERE LOWER(agent) = LOWER(%s)
+            WHERE LOWER(TRIM(agent)) = LOWER(TRIM(%s))
               AND status != 'DELETED'
             ORDER BY id DESC
         """, (allowed_agent,))
