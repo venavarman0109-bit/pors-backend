@@ -984,6 +984,277 @@ def submit_outturn():
         cur.close()
         conn.close()
 
+import json
+from flask import request, jsonify
+
+@app.route('/update_outturn_report', methods=['POST'])
+def update_outturn_report():
+    import json
+
+    data = request.json or {}
+
+    requester_username = (data.get("requester_username") or "").strip()
+    report_db_id = data.get("report_db_id")
+
+    operations = data.get("operations") or []
+    delays = data.get("delays") or []
+    remarks = data.get("remarks") or []
+    vessel_name = (data.get("vessel_name") or "").strip()
+    start_time = data.get("start_time")
+    end_time = data.get("end_time")
+    report_no = data.get("report_no")
+    report_code = data.get("report_id")
+
+    if not requester_username:
+        return jsonify({
+            "status": "error",
+            "message": "Requester missing"
+        }), 400
+
+    if not report_db_id:
+        return jsonify({
+            "status": "error",
+            "message": "Missing report id"
+        }), 400
+
+    if not operations:
+        return jsonify({
+            "status": "error",
+            "message": "No operations provided"
+        }), 400
+
+    conn = get_connection()
+    cur = conn.cursor()
+
+    try:
+        # =========================
+        # GET REQUESTER ROLE
+        # =========================
+        cur.execute("""
+            SELECT role
+            FROM users_v2
+            WHERE LOWER(username) = LOWER(%s)
+        """, (requester_username,))
+        user_row = cur.fetchone()
+
+        if not user_row:
+            return jsonify({
+                "status": "error",
+                "message": "User not found"
+            }), 404
+
+        role = user_row[0] or ""
+        role_lower = role.lower()
+
+        # =========================
+        # GET EXISTING REPORT
+        # =========================
+        cur.execute("""
+            SELECT shipment_id, created_by
+            FROM shipment_reports
+            WHERE id = %s
+        """, (report_db_id,))
+        report_row = cur.fetchone()
+
+        if not report_row:
+            return jsonify({
+                "status": "error",
+                "message": "Report not found"
+            }), 404
+
+        shipment_id = report_row[0]
+        original_creator = report_row[1] or ""
+
+        # =========================
+        # PERMISSION CHECK
+        # =========================
+        admin_roles = [
+            "System Admin",
+            "Admin Staff",
+            "Director",
+            "Manager",
+            "Supervisor"
+        ]
+
+        allowed = False
+
+        if role in admin_roles:
+            allowed = True
+        elif "tally" in role_lower or "clerk" in role_lower:
+            allowed = original_creator.lower() == requester_username.lower()
+        else:
+            allowed = False
+
+        if not allowed:
+            return jsonify({
+                "status": "forbidden",
+                "message": "You are not allowed to edit this report"
+            }), 403
+
+        # =========================
+        # GET OLD ITEMS
+        # =========================
+        cur.execute("""
+            SELECT product, tons
+            FROM shipment_report_items
+            WHERE report_id = %s
+        """, (report_db_id,))
+        old_items = cur.fetchall()
+
+        # =========================
+        # REMOVE OLD VALUES FROM SHIPMENT PRODUCTS
+        # =========================
+        for product, tons in old_items:
+            cur.execute("""
+                UPDATE shipment_products
+                SET loaded = GREATEST(loaded - %s, 0)
+                WHERE shipment_id = %s
+                  AND product = %s
+            """, (float(tons or 0), shipment_id, product))
+
+        # =========================
+        # DELETE OLD ITEMS
+        # =========================
+        cur.execute("""
+            DELETE FROM shipment_report_items
+            WHERE report_id = %s
+        """, (report_db_id,))
+
+        # =========================
+        # UPDATE REPORT HEADER
+        # =========================
+        cur.execute("""
+            UPDATE shipment_reports
+            SET report_no = %s,
+                report_id = %s,
+                start_time = %s,
+                end_time = %s,
+                delays = %s,
+                remarks = %s,
+                vessel_name = %s
+            WHERE id = %s
+        """, (
+            report_no,
+            report_code,
+            start_time,
+            end_time,
+            json.dumps(delays),
+            json.dumps(remarks),
+            vessel_name,
+            report_db_id
+        ))
+
+        # =========================
+        # INSERT NEW ITEMS + ADD TO SHIPMENT PRODUCTS
+        # =========================
+        for op in operations:
+            product = op.get("product", "")
+            hatch = op.get("hatch", "")
+            tons = float(op.get("tons", 0) or 0)
+            pcs = float(op.get("pcs", 0) or 0)
+            trips = int(op.get("trips", 0) or 0)
+            gangs = str(op.get("gangs", ""))
+            mode = op.get("mode", "LORRY")
+
+            if not product:
+                return jsonify({
+                    "status": "error",
+                    "message": "Product missing in operation"
+                }), 400
+
+            if tons <= 0:
+                return jsonify({
+                    "status": "error",
+                    "message": f"Invalid tons for {product}"
+                }), 400
+
+            # Check product balance after the old report has been removed
+            cur.execute("""
+                SELECT total_tonnage, loaded
+                FROM shipment_products
+                WHERE shipment_id = %s AND product = %s
+            """, (shipment_id, product))
+
+            result = cur.fetchone()
+
+            if not result:
+                return jsonify({
+                    "status": "error",
+                    "message": f"{product} not found"
+                }), 404
+
+            total_tonnage, loaded = result
+
+            if float(loaded or 0) + tons > float(total_tonnage or 0):
+                return jsonify({
+                    "status": "error",
+                    "message": f"{product} exceeds total balance"
+                }), 400
+
+            cur.execute("""
+                INSERT INTO shipment_report_items
+                (report_id, product, hatch, pcs, tons, trips, gangs, mode)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                report_db_id,
+                product,
+                hatch,
+                pcs,
+                tons,
+                trips,
+                gangs,
+                mode
+            ))
+
+            cur.execute("""
+                UPDATE shipment_products
+                SET loaded = loaded + %s
+                WHERE shipment_id = %s
+                  AND product = %s
+            """, (
+                tons,
+                shipment_id,
+                product
+            ))
+
+        # =========================
+        # RECHECK SHIPMENT STATUS
+        # =========================
+        cur.execute("""
+            SELECT COUNT(*)
+            FROM shipment_products
+            WHERE shipment_id = %s
+              AND loaded < total_tonnage
+        """, (shipment_id,))
+
+        remaining = cur.fetchone()[0]
+        status = "COMPLETED" if remaining == 0 else "ONGOING"
+
+        cur.execute("""
+            UPDATE shipments
+            SET status = %s
+            WHERE id = %s
+        """, (status, shipment_id))
+
+        conn.commit()
+
+        return jsonify({
+            "status": "success",
+            "message": "Report updated successfully",
+            "shipment_status": status
+        })
+
+    except Exception as e:
+        conn.rollback()
+        return jsonify({
+            "status": "error",
+            "message": str(e)
+        }), 500
+
+    finally:
+        cur.close()
+        conn.close()
+
 @app.route('/get_shipment_progress/<int:shipment_id>', methods=['GET'])
 def get_shipment_progress(shipment_id):
     requester_username = (request.args.get("requester_username") or "").strip()
