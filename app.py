@@ -8,7 +8,8 @@ from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 
-SIGNATURE_FOLDER = "signatures"
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+SIGNATURE_FOLDER = os.path.join(BASE_DIR, "signatures")
 
 if not os.path.exists(SIGNATURE_FOLDER):
     os.makedirs(SIGNATURE_FOLDER)
